@@ -1,4 +1,4 @@
-import { IsMongoId, IsNotEmpty, IsObject, IsString, MinLength } from "class-validator"
+import { IsMongoId, IsNotEmpty, IsObject, IsOptional, IsString, MinLength } from "class-validator"
 import { Types } from "mongoose"
 import { IImage } from "src/DB/models/Category/category.model"
 
@@ -14,7 +14,8 @@ export class CreateDTO {
     nameEnglish: string
 
     @IsObject()
-    image: IImage
+    @IsOptional()
+    image?: IImage
 
     @IsMongoId()
     categoryId: Types.ObjectId

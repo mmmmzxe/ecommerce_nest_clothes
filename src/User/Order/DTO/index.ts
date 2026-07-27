@@ -1,8 +1,17 @@
-import { IsArray, IsEmail, IsEnum, IsMongoId, IsNotEmpty, IsNumber, IsOptional, IsPositive, IsString, Matches, Max, MaxLength, MinLength, ValidateNested, Min } from "class-validator";
+import { IsArray, IsEmail, IsEnum, IsMongoId, IsNotEmpty, IsNumber, IsObject, IsOptional, IsPositive, IsString, Matches, Max, MaxLength, MinLength, ValidateNested, Min } from "class-validator";
+import { Type } from "class-transformer";
 import { IOrderInputs, OrderStatus, PaymentWay } from "../order.interface";
 import { ICartProduct } from "src/User/Cart/cart.interface";
-import { Type } from "class-transformer";
+
 import { Types } from "mongoose";
+
+export class DepositReceiptDTO {
+    @IsString()
+    secure_url: string;
+
+    @IsString()
+    public_id: string;
+}
 
 export class CreateOrderDTO implements IOrderInputs{
 
@@ -37,8 +46,12 @@ export class CreateOrderDTO implements IOrderInputs{
     shippingId: Types.ObjectId;
 
     @IsOptional()
-    depositReceipt?: { secure_url: string; public_id: string };
+    @ValidateNested()
+    @Type(() => DepositReceiptDTO)
+    depositReceipt?: DepositReceiptDTO;
 }
+
+
 
 export class CartVariantDTO {
     @IsString()
@@ -112,7 +125,13 @@ export class CreateOrderWithoutLoginDTO {
     lastName: string;
 
     @IsOptional()
-    depositReceipt?: { secure_url: string; public_id: string };
+    @IsNumber()
+    discountPercent?: number;
+
+    @IsOptional()
+    @ValidateNested()
+    @Type(() => DepositReceiptDTO)
+    depositReceipt?: DepositReceiptDTO;
 }
 
 export class UpdateStatusDTO {

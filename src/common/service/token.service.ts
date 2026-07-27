@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, InternalServerErrorException, NotFoundException, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, HttpException, Injectable, InternalServerErrorException, NotFoundException, UnauthorizedException } from "@nestjs/common";
 import { JwtService, JwtSignOptions, JwtVerifyOptions } from "@nestjs/jwt";
 import { UserRepository } from "src/DB/models/User/user.repository";
 export const tokenTypes = {
@@ -41,6 +41,9 @@ export class TokenService {
             }
             return user
         } catch (error) {
+            if (error instanceof HttpException) {
+                throw error;
+            }
             throw new InternalServerErrorException(error)
         }
     }

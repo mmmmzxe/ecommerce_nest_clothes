@@ -104,7 +104,8 @@ export class OrderService {
                 products,
                 createdBy: req["user"]._id,
                 finalPrice,
-                shippingId: createOrderDTO.shippingId
+                shippingId: createOrderDTO.shippingId,
+                depositReceipt: createOrderDTO.depositReceipt
             })
             await this.cartService.clearCart(req)
 
@@ -327,7 +328,8 @@ export class OrderService {
                 finalPrice,
                 firstName: firstName,
                 lastName: lastName,
-                shippingId: createOrderWithoutLoginDTO.shippingId
+                shippingId: createOrderWithoutLoginDTO.shippingId,
+                depositReceipt: createOrderWithoutLoginDTO.depositReceipt
             })
 
             for (const product of products) {

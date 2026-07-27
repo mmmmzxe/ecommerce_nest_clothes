@@ -81,6 +81,12 @@ export class Order {
     @Prop({ type: Number, required: false, default: 0 })
     deposit?: number;
 
+    @Prop(raw({
+        secure_url: { type: String, required: false },
+        public_id: { type: String, required: false }
+    }))
+    depositReceipt?: { secure_url: string; public_id: string };
+
 }
 
 const orderSchema = SchemaFactory.createForClass(Order)

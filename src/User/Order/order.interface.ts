@@ -36,8 +36,8 @@ export interface IOrderInputs {
     address:string,
     phone:string,
     note?: string,
-    paymentWay:PaymentWay
-
+    paymentWay:PaymentWay,
+    depositReceipt?: { secure_url: string; public_id: string }
 }
 
 export interface IOrder extends IOrderInputs {
@@ -58,6 +58,7 @@ export interface IOrder extends IOrderInputs {
     finalPrice:number,
     intentId?: string,
     deposit?: number,
+    depositReceipt?: { secure_url: string; public_id: string },
     updatedAt:Date,
     createdAt:Date
 }

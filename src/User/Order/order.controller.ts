@@ -1,5 +1,8 @@
-import { Body, Controller, Get, InternalServerErrorException, Param, Patch, Post, Req, UseGuards, UsePipes, ValidationPipe } from "@nestjs/common";
+import { Body, Controller, Get, InternalServerErrorException, Param, Patch, Post, Req, UseGuards, UsePipes, ValidationPipe, UseInterceptors } from "@nestjs/common";
 import { OrderService } from "./order.service";
+import { FileInterceptor } from "@nestjs/platform-express";
+import { multerOptions } from "src/common/Utility/multer";
+import { CloudInterceptor } from "src/common/Interceptors/cloud.interceptor";
 import { Role } from "src/common/Decorator/role.decorator";
 import { AuthGuard } from "src/common/Guards/auth.guard";
 import { RoleGuard } from "src/common/Guards/role.guard";
@@ -36,7 +39,16 @@ export class OrderController {
             order
         }
     }
-    
+
+    @Public("public")
+    @Post("upload-receipt")
+    @UseInterceptors(FileInterceptor("receipt", multerOptions()), CloudInterceptor)
+    async uploadReceipt(@Req() req: Request) {
+        return {
+            message: "Receipt uploaded successfully",
+            receipt: req.body.image
+        }
+    }
 
     @Post(":orderId/paymob")
     async paymob(@Req() req: Request, @Param() params: OrderIdDTO) {

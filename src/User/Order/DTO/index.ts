@@ -35,6 +35,9 @@ export class CreateOrderDTO implements IOrderInputs{
     @IsMongoId()
     @Type(() => Types.ObjectId)
     shippingId: Types.ObjectId;
+
+    @IsOptional()
+    depositReceipt?: { secure_url: string; public_id: string };
 }
 
 export class CartVariantDTO {
@@ -107,6 +110,9 @@ export class CreateOrderWithoutLoginDTO {
 
     @IsString()
     lastName: string;
+
+    @IsOptional()
+    depositReceipt?: { secure_url: string; public_id: string };
 }
 
 export class UpdateStatusDTO {

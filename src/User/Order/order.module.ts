@@ -14,6 +14,7 @@ import { UserRepository } from "src/DB/models/User/user.repository";
 import { PaymobModule } from "src/Payment/paymob.module";
 import { ShippingRepository } from "src/DB/models/Shipping/shipping.repository";
 import { ShippingModel } from "src/DB/models/Shipping/shipping.model";
+import { CloudService } from "src/common/service/cloud.service";
 
 @Module({
     imports:[CartModel, ProductModel, OrderModel, UserModel, PaymobModule, ShippingModel],
@@ -27,6 +28,7 @@ import { ShippingModel } from "src/DB/models/Shipping/shipping.model";
         PaymentService,
         UserRepository,
         ShippingRepository,
+        CloudService,
     ],
 })
 export class OrderModule {}

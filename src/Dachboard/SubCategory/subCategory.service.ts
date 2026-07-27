@@ -36,8 +36,8 @@ export class SubCategoryService {
                 nameEnglish,
                 categoryId: id,
                 image: {
-                    secure_url: body.image?.secure_url,
-                    public_id: body.image?.public_id
+                    secure_url: body.image?.secure_url ?? "",
+                    public_id: body.image?.public_id ?? ""
                 },
                 createdBy: req["user"]._id as Types.ObjectId
             })

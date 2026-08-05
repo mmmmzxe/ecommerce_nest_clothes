@@ -13,10 +13,20 @@ export async function sendEmail (sendMailOptoitn: nodemailer.SendMailOptions){
         },
     });
 
-    const info = await transporter.sendMail({
-        from: `extra chic <${process.env.EMAIL}>`, // sender address
-        ...sendMailOptoitn,
-    });
+    try {
+        console.log('Verifying email transporter for', process.env.EMAIL);
+        await transporter.verify();
+        console.log('Email transporter verified successfully');
 
-    console.log("Message sent: %s", info.messageId);
+        const info = await transporter.sendMail({
+            from: `extra chic <${process.env.EMAIL}>`, // sender address
+            ...sendMailOptoitn,
+        });
+
+        console.log('Message sent: %s', info.messageId);
+        return info;
+    } catch (error) {
+        console.error('Failed to send email to', sendMailOptoitn.to, 'error:', error);
+        throw error;
+    }
 }

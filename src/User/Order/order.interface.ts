@@ -12,7 +12,9 @@ export enum OrderStatus {
 
 export enum PaymentWay {
     cash= "cash",
-    card="card"
+    card="card",
+    instapay="instapay",
+    vodafone_cash="vodafone_cash"
 }
 export class OrderIdDTO {
     @IsMongoId()

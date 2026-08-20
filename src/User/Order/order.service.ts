@@ -127,7 +127,7 @@ export class OrderService {
                 );
             }
             emailEvent.emit("CreateOrder", { email: req["user"].email, order, userName: req["user"].name })
-            emailEvent.emit("CreateOrderAdmin", { email: process.env.EMAIL, order, userName: req["user"].name, customerEmail: req["user"].email })
+            emailEvent.emit("CreateOrderAdmin", { email: process.env.EMAIL, order, userName: req["user"].name, customerEmail: req["user"].email, phone: order.phone, address: order.address, products: order.products })
             return { order }
         } catch (error) {
             if (error instanceof HttpException) {
@@ -348,7 +348,7 @@ export class OrderService {
                 );
             }
             emailEvent.emit("CreateOrder", { email: order.email, order, userName: order.firstName + " " + order.lastName })
-            emailEvent.emit("CreateOrderAdmin", { email: process.env.EMAIL, order, userName: order.firstName + " " + order.lastName, customerEmail: order.email })
+            emailEvent.emit("CreateOrderAdmin", { email: process.env.EMAIL, order, userName: order.firstName + " " + order.lastName, customerEmail: order.email, phone: order.phone, address: order.address, products: order.products })
             return order
         } catch (error) {
             if (error instanceof HttpException) {

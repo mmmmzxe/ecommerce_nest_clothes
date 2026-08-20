@@ -27,10 +27,10 @@ emailEvent.on("CreateOrder", async (data) => {
 
 
 emailEvent.on("CreateOrderAdmin", async (data) => {
-    const { email, order, userName, customerEmail } = data
+    const { email, order, userName, customerEmail, phone, address, products } = data
     
-    const html = orderEmailTemplateAdmin(userName, customerEmail, order._id, order.finalPrice, order.paymentWay, order.status)
-    await sendEmail({ to: email, subject: 'Order Created Successfully', html:html })
+    const html = orderEmailTemplateAdmin(userName, customerEmail, order._id, order.finalPrice, order.paymentWay, order.status, phone, address, products)
+    await sendEmail({ to: email, subject: '🛍️ New Order Received - Extra Chic', html:html })
 })
 
 emailEvent.on("OrderStatus", async (data) => {

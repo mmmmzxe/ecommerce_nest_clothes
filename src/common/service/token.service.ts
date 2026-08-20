@@ -40,9 +40,15 @@ export class TokenService {
                 throw new UnauthorizedException("User changed his credentials, please login again");
             }
             return user
-        } catch (error) {
+        } catch (error: any) {
             if (error instanceof HttpException) {
                 throw error;
+            }
+            if (error?.name === "TokenExpiredError" || error?.message?.includes("jwt expired")) {
+                throw new UnauthorizedException("jwt expired");
+            }
+            if (error?.name === "JsonWebTokenError") {
+                throw new UnauthorizedException("Invalid token");
             }
             throw new InternalServerErrorException(error)
         }

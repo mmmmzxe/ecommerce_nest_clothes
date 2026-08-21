@@ -124,6 +124,99 @@ export class SocialOrderService {
     }
   }
 
+  async updateOrder(
+    id: string,
+    dto: Partial<CreateSocialOrderDto>,
+    user: TypeUser,
+    file?: Express.Multer.File,
+  ): Promise<TypeSocialOrder> {
+    try {
+      const order = await this.socialOrderRepository.findOne({ _id: new Types.ObjectId(id) });
+      if (!order) throw new NotFoundException('Order not found');
+
+      // Admin sellers can only edit their own orders
+      if (user.role === 'admin') {
+        const creatorIdStr = (order.createdByUserId as any)?._id
+          ? (order.createdByUserId as any)._id.toString()
+          : order.createdByUserId?.toString();
+        const sellerNameMatch =
+          order.createdBy &&
+          user.name &&
+          order.createdBy.toLowerCase() === user.name.toLowerCase();
+
+        if (creatorIdStr !== (user._id as any).toString() && !sellerNameMatch) {
+          throw new ForbiddenException('You can only edit your own orders');
+        }
+      }
+
+      // Calculate changes summary
+      const changes: string[] = [];
+      const previousState: Record<string, any> = {};
+
+      const checkField = (key: string, label: string) => {
+        if (dto[key] !== undefined && String(dto[key]) !== String((order as any)[key] ?? '')) {
+          changes.push(`${label}: "${(order as any)[key] ?? ''}" ➔ "${dto[key]}"`);
+          previousState[key] = (order as any)[key];
+        }
+      };
+
+      checkField('productName', 'Product Name');
+      checkField('price', 'Price');
+      checkField('color', 'Color');
+      checkField('size', 'Size');
+      checkField('quantity', 'Quantity');
+      checkField('productNotes', 'Product Notes');
+      checkField('customerName', 'Customer Name');
+      checkField('customerPhone', 'Phone');
+      checkField('customerAddress', 'Address');
+      checkField('city', 'City');
+      checkField('deliveryNotes', 'Delivery Notes');
+
+      let productImage = order.productImage;
+      if (file) {
+        const uploaded = await this.cloudService.uploadFile({ path: file.path });
+        productImage = {
+          secure_url: uploaded.secure_url,
+          public_id: uploaded.public_id,
+        };
+        changes.push('Product Image updated');
+        previousState['productImage'] = order.productImage;
+      }
+
+      const summary = changes.length > 0 ? changes.join(' | ') : 'Order updated';
+
+      const historyEntry = {
+        editedBy: user.name || user.email,
+        editedByUserId: new Types.ObjectId(user._id as string),
+        editedAt: new Date(),
+        summary,
+        previousState,
+      };
+
+      const updatedFields: any = {
+        ...dto,
+        status: 'pending', // Reset status to pending so SuperAdmin can re-confirm
+      };
+      if (productImage) updatedFields.productImage = productImage;
+      if (dto.price) updatedFields.price = Number(dto.price);
+      if (dto.quantity) updatedFields.quantity = Number(dto.quantity);
+
+      const updated = await this.socialOrderRepository.findOneAndUpdate(
+        { _id: new Types.ObjectId(id) },
+        {
+          $set: updatedFields,
+          $push: { editHistory: historyEntry },
+        },
+      );
+
+      if (!updated) throw new NotFoundException('Order not found');
+      return updated;
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof ForbiddenException) throw error;
+      throw new InternalServerErrorException(error);
+    }
+  }
+
   async getSellerStats(): Promise<{
     seller: string;
     count: number;

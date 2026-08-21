@@ -161,5 +161,31 @@ export class SocialOrderController {
       throw new InternalServerErrorException(error);
     }
   }
+
+  /**
+   * PATCH /social-orders/:id
+   * Edit an existing social media order.
+   * Allowed for the seller who created the order (admin) and superAdmin.
+   */
+  @Patch(':id')
+  @Role(['admin', 'superAdmin'])
+  @UseInterceptors(
+    FileInterceptor('productImage', multerOptions()),
+    CloudInterceptor,
+  )
+  async updateOrder(
+    @Param('id') id: string,
+    @Body() dto: Partial<CreateSocialOrderDto>,
+    @Req() req: Request,
+  ) {
+    const file = req['file'] as Express.Multer.File | undefined;
+    const order = await this.socialOrderService.updateOrder(
+      id,
+      dto,
+      req['user'],
+      file,
+    );
+    return { message: 'Done', data: order };
+  }
 }
 

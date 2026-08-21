@@ -1,12 +1,20 @@
 import { MongooseModule, Prop, raw, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 
-export type SellerName = 'Fatma' | 'Mariam' | 'Zeinab';
+export type SellerName = 'Fatma' | 'Mariam' | 'Zeinab' | 'Sara';
+
+export interface EditHistoryEntry {
+  editedBy: string;
+  editedByUserId?: Types.ObjectId;
+  editedAt: Date;
+  summary: string;
+  previousState?: Record<string, any>;
+}
 
 @Schema({ timestamps: true })
 export class SocialOrder {
   // ─── Seller Info ────────────────────────────────────────────────────────────
-  @Prop({ type: String, enum: ['Fatma', 'Mariam', 'Zeinab'], required: true })
+  @Prop({ type: String, enum: ['Fatma', 'Mariam', 'Zeinab', 'Sara'], required: true })
   createdBy: SellerName;
 
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
@@ -15,6 +23,21 @@ export class SocialOrder {
   // ─── Status ──────────────────────────────────────────────────────────────────
   @Prop({ type: String, enum: ['pending', 'confirmed', 'cancelled'], default: 'pending' })
   status: 'pending' | 'confirmed' | 'cancelled';
+
+  // ─── Edit History Audit Log ──────────────────────────────────────────────────
+  @Prop({
+    type: [
+      raw({
+        editedBy: { type: String, required: true },
+        editedByUserId: { type: Types.ObjectId, ref: 'User' },
+        editedAt: { type: Date, default: Date.now },
+        summary: { type: String, required: true },
+        previousState: { type: Object },
+      }),
+    ],
+    default: [],
+  })
+  editHistory: EditHistoryEntry[];
 
   // ─── Product Info ────────────────────────────────────────────────────────────
   @Prop({ type: String, required: true })

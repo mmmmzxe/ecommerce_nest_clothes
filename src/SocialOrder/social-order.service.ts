@@ -12,7 +12,7 @@ import { CreateSocialOrderDto } from './dto/create-social-order.dto';
 import { SocialOrderRepository } from './social-order.repository';
 import { TypeSocialOrder } from './social-order.model';
 
-const SELLER_NAMES = ['Fatma', 'Mariam', 'Zeinab'] as const;
+const SELLER_NAMES = ['Fatma', 'Mariam', 'Zeinab', 'Sara'] as const;
 
 @Injectable()
 export class SocialOrderService {

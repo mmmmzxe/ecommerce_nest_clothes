@@ -117,11 +117,21 @@ export class SocialOrderController {
       if (!order) throw new NotFoundException('Order not found');
 
       // Admin can only view their own orders
-      if (
-        req['user'].role === 'admin' &&
-        order.createdByUserId.toString() !== req['user']._id.toString()
-      ) {
-        throw new NotFoundException('Order not found');
+      if (req['user'].role === 'admin') {
+        const userIdStr = req['user']._id ? req['user']._id.toString() : '';
+        const creatorIdStr = (order.createdByUserId as any)?._id
+          ? (order.createdByUserId as any)._id.toString()
+          : order.createdByUserId
+          ? order.createdByUserId.toString()
+          : '';
+        const sellerNameMatch =
+          order.createdBy &&
+          req['user'].name &&
+          order.createdBy.toLowerCase() === req['user'].name.toLowerCase();
+
+        if (creatorIdStr !== userIdStr && !sellerNameMatch) {
+          throw new NotFoundException('Order not found');
+        }
       }
 
       return { message: 'Done', data: order };

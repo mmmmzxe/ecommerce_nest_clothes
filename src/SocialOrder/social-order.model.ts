@@ -12,6 +12,10 @@ export class SocialOrder {
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   createdByUserId: Types.ObjectId;
 
+  // ─── Status ──────────────────────────────────────────────────────────────────
+  @Prop({ type: String, enum: ['pending', 'confirmed', 'cancelled'], default: 'pending' })
+  status: 'pending' | 'confirmed' | 'cancelled';
+
   // ─── Product Info ────────────────────────────────────────────────────────────
   @Prop({ type: String, required: true })
   productName: string;

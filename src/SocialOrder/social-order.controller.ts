@@ -5,6 +5,7 @@ import {
   InternalServerErrorException,
   NotFoundException,
   Param,
+  Patch,
   Post,
   Req,
   UploadedFile,
@@ -130,6 +131,25 @@ export class SocialOrderController {
     }
   }
 
-  // ─── NO PUT / PATCH / DELETE routes ────────────────────────────────────────
-  // Orders are immutable after creation by design.
+  /**
+   * PATCH /social-orders/:id/status
+   * SuperAdmin only — confirm or cancel a social media order.
+   */
+  @Patch(':id/status')
+  @Role(['superAdmin'])
+  async updateStatus(
+    @Param('id') id: string,
+    @Body('status') status: 'confirmed' | 'cancelled',
+  ) {
+    try {
+      if (!['confirmed', 'cancelled'].includes(status)) {
+        throw new InternalServerErrorException('Status must be "confirmed" or "cancelled"');
+      }
+      const order = await this.socialOrderService.updateStatus(id, status);
+      return { message: 'Done', data: order };
+    } catch (error) {
+      throw new InternalServerErrorException(error);
+    }
+  }
 }
+

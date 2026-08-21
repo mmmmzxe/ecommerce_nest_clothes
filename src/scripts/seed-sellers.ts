@@ -1,6 +1,6 @@
 import { config } from 'dotenv';
 import { resolve } from 'path';
-import mongoose from 'mongoose';
+import mongoose, { Schema } from 'mongoose';
 import * as bcrypt from 'bcrypt';
 
 config({ path: resolve('.env') });
@@ -15,42 +15,58 @@ const sellers = [
   { name: 'Zeinab', email: 'zeinab@extrachic.com', password: 'Password123!', phone: '01000000003', address: 'Cairo' },
 ];
 
+const UserSchema = new Schema(
+  {
+    name: { type: String, required: true },
+    email: { type: String, required: true, unique: true },
+    password: { type: String, required: true },
+    phone: { type: String, required: true },
+    address: { type: String, required: true },
+    role: { type: String, default: 'user' },
+    favorites: { type: Array, default: [] },
+  },
+  { timestamps: true }
+);
+
+const UserModel = mongoose.models.User || mongoose.model('User', UserSchema);
+
 async function seedSellers() {
-  console.log(`Connecting to database at ${databaseUrl}...`);
-  try {
-    await mongoose.connect(databaseUrl, { serverSelectionTimeoutMS: 5000 });
-  } catch (err: any) {
-    if (process.env.DB_URL && databaseUrl !== process.env.DB_URL) {
-      console.log(`Failed to connect to local DB. Trying remote DB_URL...`);
-      await mongoose.connect(process.env.DB_URL, { serverSelectionTimeoutMS: 5000 });
-    } else {
-      throw err;
+  let connected = false;
+  const urlsToTry = [
+    databaseUrl,
+    process.env.DB_URL,
+    process.env.DB_URL_LOCAL,
+  ].filter(Boolean) as string[];
+
+  for (const url of urlsToTry) {
+    try {
+      console.log(`Connecting to database at ${url}...`);
+      await mongoose.connect(url, { serverSelectionTimeoutMS: 5000 });
+      connected = true;
+      break;
+    } catch (err: any) {
+      console.warn(`Connection failed for ${url}: ${err.message}`);
     }
   }
 
-  const UserCollection = mongoose.connection.collection('users');
+  if (!connected) {
+    throw new Error('Failed to connect to any MongoDB instance.');
+  }
 
   for (const seller of sellers) {
-    const existing = await UserCollection.findOne({ email: seller.email });
+    const existing = await UserModel.findOne({ email: seller.email });
     const hashedPassword = bcrypt.hashSync(seller.password, 10);
 
     if (existing) {
-      await UserCollection.updateOne(
-        { email: seller.email },
-        {
-          $set: {
-            name: seller.name,
-            password: hashedPassword,
-            role: 'admin',
-            phone: seller.phone,
-            address: seller.address,
-            updatedAt: new Date(),
-          },
-        }
-      );
+      existing.name = seller.name;
+      existing.password = hashedPassword;
+      existing.role = 'admin';
+      existing.phone = seller.phone;
+      existing.address = seller.address;
+      await existing.save();
       console.log(`Updated seller account: ${seller.name} (${seller.email})`);
     } else {
-      await UserCollection.insertOne({
+      await UserModel.create({
         name: seller.name,
         email: seller.email,
         password: hashedPassword,
@@ -58,8 +74,6 @@ async function seedSellers() {
         phone: seller.phone,
         address: seller.address,
         favorites: [],
-        createdAt: new Date(),
-        updatedAt: new Date(),
       });
       console.log(`Created seller account: ${seller.name} (${seller.email})`);
     }

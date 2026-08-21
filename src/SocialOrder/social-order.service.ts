@@ -2,10 +2,12 @@ import {
   ForbiddenException,
   Injectable,
   InternalServerErrorException,
+  NotFoundException,
 } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { TypeUser } from 'src/DB/models/User/user.model';
 import { CloudService } from 'src/common/service/cloud.service';
+import { emailEvent } from 'src/common/Utility/email.event';
 import { CreateSocialOrderDto } from './dto/create-social-order.dto';
 import { SocialOrderRepository } from './social-order.repository';
 import { TypeSocialOrder } from './social-order.model';
@@ -51,7 +53,11 @@ export class SocialOrderService {
         ...dto,
         createdByUserId: new Types.ObjectId(user._id as string),
         productImage,
+        status: 'pending',
       } as any);
+
+      // Emit email notification to extrachick8@gmail.com
+      emailEvent.emit('SocialOrderCreated', { order });
 
       return order;
     } catch (error) {
@@ -99,18 +105,51 @@ export class SocialOrderService {
     }
   }
 
-  async getSellerStats(): Promise<{ seller: string; count: number }[]> {
+  async updateStatus(
+    id: string,
+    status: 'confirmed' | 'cancelled',
+  ): Promise<TypeSocialOrder> {
+    try {
+      const order = await this.socialOrderRepository.findOneAndUpdate(
+        { _id: new Types.ObjectId(id) },
+        { status },
+      );
+      if (!order) {
+        throw new NotFoundException('Social order not found');
+      }
+      return order;
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error;
+      throw new InternalServerErrorException(error);
+    }
+  }
+
+  async getSellerStats(): Promise<{
+    seller: string;
+    count: number;
+    confirmedCount: number;
+    pendingCount: number;
+    cancelledCount: number;
+  }[]> {
     try {
       const raw = await this.socialOrderRepository.countBySeller();
 
       // Ensure all three sellers are always present
-      const map = new Map(raw.map((r) => [r._id, r.count]));
-      return SELLER_NAMES.map((name) => ({
-        seller: name,
-        count: map.get(name) ?? 0,
-      }));
+      const map = new Map(raw.map((r) => [r._id, r]));
+      return SELLER_NAMES.map((name) => {
+        const item = map.get(name);
+        return {
+          seller: name,
+          count: item?.count ?? 0,
+          confirmedCount: item?.confirmedCount ?? 0,
+          pendingCount: item?.pendingCount ?? 0,
+          cancelledCount: item?.cancelledCount ?? 0,
+        };
+      });
     } catch (error) {
       throw new InternalServerErrorException(error);
     }
   }
 }
+
+

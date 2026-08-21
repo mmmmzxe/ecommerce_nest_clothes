@@ -20,10 +20,44 @@ export class SocialOrderRepository extends DBService<TypeSocialOrder> {
       .exec();
   }
 
-  async countBySeller(): Promise<{ _id: string; count: number }[]> {
+  async countBySeller(): Promise<
+    {
+      _id: string;
+      count: number;
+      confirmedCount: number;
+      pendingCount: number;
+      cancelledCount: number;
+    }[]
+  > {
     return this.socialOrderModel.aggregate([
-      { $group: { _id: '$createdBy', count: { $sum: 1 } } },
+      {
+        $group: {
+          _id: '$createdBy',
+          count: { $sum: 1 },
+          confirmedCount: {
+            $sum: { $cond: [{ $eq: ['$status', 'confirmed'] }, 1, 0] },
+          },
+          cancelledCount: {
+            $sum: { $cond: [{ $eq: ['$status', 'cancelled'] }, 1, 0] },
+          },
+          pendingCount: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $ne: ['$status', 'confirmed'] },
+                    { $ne: ['$status', 'cancelled'] },
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+        },
+      },
       { $sort: { _id: 1 } },
     ]);
   }
+
 }

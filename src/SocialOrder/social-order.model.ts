@@ -54,6 +54,17 @@ export class SocialOrder {
   @Prop({ type: Number, required: true })
   price: number;
 
+  @Prop({ type: Number, required: false, default: 0 })
+  deposit?: number;
+
+  @Prop(
+    raw({
+      secure_url: { type: String, required: false },
+      public_id: { type: String, required: false },
+    }),
+  )
+  depositImage?: { secure_url: string; public_id: string };
+
   @Prop({ type: String, required: false })
   color?: string;
 

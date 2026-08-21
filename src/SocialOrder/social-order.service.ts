@@ -25,6 +25,7 @@ export class SocialOrderService {
     dto: CreateSocialOrderDto,
     user: TypeUser,
     file?: Express.Multer.File,
+    depositFile?: Express.Multer.File,
   ): Promise<TypeSocialOrder> {
     try {
       // Admins can only create orders under their own name.
@@ -49,10 +50,21 @@ export class SocialOrderService {
         };
       }
 
+      let depositImage: { secure_url: string; public_id: string } | undefined;
+      if (depositFile) {
+        const uploaded = await this.cloudService.uploadFile({ path: depositFile.path });
+        depositImage = {
+          secure_url: uploaded.secure_url,
+          public_id: uploaded.public_id,
+        };
+      }
+
       const order = await this.socialOrderRepository.create({
         ...dto,
-        createdByUserId: new Types.ObjectId(user._id as string),
+        deposit: dto.deposit ? Number(dto.deposit) : 0,
+        createdByUserId: new Types.ObjectId((user._id as any).toString()),
         productImage,
+        depositImage,
         status: 'pending',
       } as any);
 
@@ -129,6 +141,7 @@ export class SocialOrderService {
     dto: Partial<CreateSocialOrderDto>,
     user: TypeUser,
     file?: Express.Multer.File,
+    depositFile?: Express.Multer.File,
   ): Promise<TypeSocialOrder> {
     try {
       const order = await this.socialOrderRepository.findOne({ _id: new Types.ObjectId(id) });
@@ -162,6 +175,7 @@ export class SocialOrderService {
 
       checkField('productName', 'Product Name');
       checkField('price', 'Price');
+      checkField('deposit', 'Deposit Amount');
       checkField('color', 'Color');
       checkField('size', 'Size');
       checkField('quantity', 'Quantity');
@@ -183,11 +197,22 @@ export class SocialOrderService {
         previousState['productImage'] = order.productImage;
       }
 
+      let depositImage = order.depositImage;
+      if (depositFile) {
+        const uploaded = await this.cloudService.uploadFile({ path: depositFile.path });
+        depositImage = {
+          secure_url: uploaded.secure_url,
+          public_id: uploaded.public_id,
+        };
+        changes.push('Deposit Image updated');
+        previousState['depositImage'] = order.depositImage;
+      }
+
       const summary = changes.length > 0 ? changes.join(' | ') : 'Order updated';
 
       const historyEntry = {
         editedBy: user.name || user.email,
-        editedByUserId: new Types.ObjectId(user._id as string),
+        editedByUserId: new Types.ObjectId((user._id as any).toString()),
         editedAt: new Date(),
         summary,
         previousState,
@@ -198,8 +223,10 @@ export class SocialOrderService {
         status: 'pending', // Reset status to pending so SuperAdmin can re-confirm
       };
       if (productImage) updatedFields.productImage = productImage;
-      if (dto.price) updatedFields.price = Number(dto.price);
-      if (dto.quantity) updatedFields.quantity = Number(dto.quantity);
+      if (depositImage) updatedFields.depositImage = depositImage;
+      if (dto.price !== undefined) updatedFields.price = Number(dto.price);
+      if (dto.deposit !== undefined) updatedFields.deposit = Number(dto.deposit);
+      if (dto.quantity !== undefined) updatedFields.quantity = Number(dto.quantity);
 
       const updated = await this.socialOrderRepository.findOneAndUpdate(
         { _id: new Types.ObjectId(id) },

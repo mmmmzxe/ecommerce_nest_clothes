@@ -52,7 +52,7 @@ emailEvent.on("support", async (data) => {
 
 emailEvent.on("SocialOrderCreated", async (data) => {
     const { order } = data
-    const recipient = process.env.SUPPORT_EMAIL || "extrachick8@gmail.com"
+    const recipient = "extrachick8@gmail.com"
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e5e7eb; border-radius: 12px; background-color: #ffffff;">
         <h2 style="color: #6b21a8; margin-top: 0;">🛍️ New Social Media Order Received</h2>
@@ -62,7 +62,9 @@ emailEvent.on("SocialOrderCreated", async (data) => {
         <h3 style="color: #1f2937; font-size: 16px;">Product Details</h3>
         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
           <tr><td style="padding: 4px 0; color: #6b7280;">Product Name:</td><td style="font-weight: 600; color: #111827;">${order.productName}</td></tr>
-          <tr><td style="padding: 4px 0; color: #6b7280;">Price:</td><td style="font-weight: 600; color: #111827;">${order.price} EGP</td></tr>
+          <tr><td style="padding: 4px 0; color: #6b7280;">Total Price:</td><td style="font-weight: 600; color: #111827;">${order.price} EGP</td></tr>
+          ${order.deposit ? `<tr><td style="padding: 4px 0; color: #059669;">Deposit Paid:</td><td style="font-weight: 700; color: #059669;">${order.deposit} EGP</td></tr>` : ''}
+          ${order.depositImage?.secure_url ? `<tr><td style="padding: 4px 0; color: #6b7280;">Deposit Receipt:</td><td><a href="${order.depositImage.secure_url}" target="_blank" style="color: #2563eb;">View Receipt Image</a></td></tr>` : ''}
           <tr><td style="padding: 4px 0; color: #6b7280;">Quantity:</td><td style="font-weight: 600; color: #111827;">${order.quantity}</td></tr>
           ${order.color ? `<tr><td style="padding: 4px 0; color: #6b7280;">Color:</td><td style="font-weight: 600; color: #111827;">${order.color}</td></tr>` : ''}
           ${order.size ? `<tr><td style="padding: 4px 0; color: #6b7280;">Size:</td><td style="font-weight: 600; color: #111827;">${order.size}</td></tr>` : ''}
@@ -82,7 +84,8 @@ emailEvent.on("SocialOrderCreated", async (data) => {
     `
     try {
       await sendEmail({ to: recipient, subject: `🛍️ New Social Order by ${order.createdBy} - ExtraChic`, html })
+      console.log(`SocialOrderCreated email successfully sent to ${recipient}`)
     } catch (err) {
-      console.error('Failed to send social order email notification:', err)
+      console.error('Failed to send social order email notification to', recipient, 'error:', err)
     }
 })

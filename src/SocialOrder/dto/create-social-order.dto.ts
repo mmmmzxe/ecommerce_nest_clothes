@@ -3,9 +3,9 @@ import { Type } from 'class-transformer';
 
 export class CreateSocialOrderDto {
   // ─── Seller ─────────────────────────────────────────────────────────────────
-  @IsEnum(['Fatma', 'Mariam', 'Zeinab'])
+  @IsEnum(['Fatma', 'Mariam', 'Zeinab', 'Sara'])
   @IsNotEmpty()
-  createdBy: 'Fatma' | 'Mariam' | 'Zeinab';
+  createdBy: 'Fatma' | 'Mariam' | 'Zeinab' | 'Sara';
 
   // ─── Product ─────────────────────────────────────────────────────────────────
   @IsString()
@@ -16,6 +16,12 @@ export class CreateSocialOrderDto {
   @Min(0)
   @Type(() => Number)
   price: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  @Type(() => Number)
+  deposit?: number;
 
   @IsString()
   @IsOptional()

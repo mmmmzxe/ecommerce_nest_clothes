@@ -9,10 +9,11 @@ import {
   Post,
   Req,
   UploadedFile,
+  UploadedFiles,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileFieldsInterceptor, FileInterceptor } from '@nestjs/platform-express';
 import { Request } from 'express';
 import { Role } from 'src/common/Decorator/role.decorator';
 import { AuthGuard } from 'src/common/Guards/auth.guard';
@@ -30,32 +31,38 @@ export class SocialOrderController {
   /**
    * POST /social-orders
    * Both admin sellers and superAdmin can create orders.
-   * File field name: "productImage"
+   * Multipart fields: "productImage", "depositImage"
    */
   @Post()
   @Role(['admin', 'superAdmin'])
   @UseInterceptors(
-    FileInterceptor('productImage', multerOptions()),
+    FileFieldsInterceptor(
+      [
+        { name: 'productImage', maxCount: 1 },
+        { name: 'depositImage', maxCount: 1 },
+      ],
+      multerOptions(),
+    ),
     CloudInterceptor,
   )
   async create(
     @Body() dto: CreateSocialOrderDto,
     @Req() req: Request,
-    @UploadedFile() _file: Express.Multer.File,
+    @UploadedFiles()
+    files: {
+      productImage?: Express.Multer.File[];
+      depositImage?: Express.Multer.File[];
+    },
   ) {
-    // CloudInterceptor already uploaded the file and set req.body.image
-    // We pass the raw file reference so the service can handle it if needed
-    const file = req['file'] as Express.Multer.File | undefined;
-    const imageFromInterceptor = req.body.image as
-      | { secure_url: string; public_id: string }
-      | undefined;
+    const pFile = files?.productImage?.[0];
+    const dFile = files?.depositImage?.[0];
 
-    const order = await this.socialOrderService.create(dto, req['user'], file);
-
-    // If the interceptor already set the image on req.body.image, patch it in
-    if (imageFromInterceptor && !order.productImage) {
-      (order as any).productImage = imageFromInterceptor;
-    }
+    const order = await this.socialOrderService.create(
+      dto,
+      req['user'],
+      pFile,
+      dFile,
+    );
 
     return { message: 'Done', data: order };
   }
@@ -170,20 +177,34 @@ export class SocialOrderController {
   @Patch(':id')
   @Role(['admin', 'superAdmin'])
   @UseInterceptors(
-    FileInterceptor('productImage', multerOptions()),
+    FileFieldsInterceptor(
+      [
+        { name: 'productImage', maxCount: 1 },
+        { name: 'depositImage', maxCount: 1 },
+      ],
+      multerOptions(),
+    ),
     CloudInterceptor,
   )
   async updateOrder(
     @Param('id') id: string,
     @Body() dto: Partial<CreateSocialOrderDto>,
     @Req() req: Request,
+    @UploadedFiles()
+    files: {
+      productImage?: Express.Multer.File[];
+      depositImage?: Express.Multer.File[];
+    },
   ) {
-    const file = req['file'] as Express.Multer.File | undefined;
+    const pFile = files?.productImage?.[0];
+    const dFile = files?.depositImage?.[0];
+
     const order = await this.socialOrderService.updateOrder(
       id,
       dto,
       req['user'],
-      file,
+      pFile,
+      dFile,
     );
     return { message: 'Done', data: order };
   }

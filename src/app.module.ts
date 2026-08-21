@@ -12,6 +12,7 @@ import { SellerModule } from './Seller/seller.module';
 import { SupportModule } from './Support/support.module';
 import { ShippingModule } from './Shipping/shipping.module';
 import { AnnouncementModule } from './Announcement/announcement.module';
+import { SocialOrderModule } from './SocialOrder/social-order.module';
 import { CacheModule } from '@nestjs/cache-manager';
 import { createKeyv } from '@keyv/redis';
 import { AppController } from './app.controller';
@@ -46,6 +47,7 @@ if (!databaseUrl) {
     SupportModule,
     ShippingModule,
     AnnouncementModule,
+    SocialOrderModule,
   ],
   providers: [],
 })

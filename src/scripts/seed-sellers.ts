@@ -33,24 +33,28 @@ const UserModel = mongoose.models.User || mongoose.model('User', UserSchema);
 async function seedSellers() {
   let connected = false;
   const urlsToTry = [
-    databaseUrl,
     process.env.DB_URL,
     process.env.DB_URL_LOCAL,
+    'mongodb://127.0.0.1:27017/ecommerce_nest_clothes',
   ].filter(Boolean) as string[];
 
   for (const url of urlsToTry) {
     try {
       console.log(`Connecting to database at ${url}...`);
       await mongoose.connect(url, { serverSelectionTimeoutMS: 5000 });
+      // Test query to verify auth permissions
+      await UserModel.findOne({});
       connected = true;
+      console.log(`Successfully authenticated with database at ${url}`);
       break;
     } catch (err: any) {
-      console.warn(`Connection failed for ${url}: ${err.message}`);
+      console.warn(`Connection/auth failed for ${url}: ${err.message}`);
+      await mongoose.disconnect().catch(() => {});
     }
   }
 
   if (!connected) {
-    throw new Error('Failed to connect to any MongoDB instance.');
+    throw new Error('Failed to connect and authenticate with any MongoDB instance.');
   }
 
   for (const seller of sellers) {

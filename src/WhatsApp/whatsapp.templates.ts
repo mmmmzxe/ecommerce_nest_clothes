@@ -1,7 +1,7 @@
 /**
  * WhatsApp message templates for the order flow.
  * All messages use text-only (Hashtag API does not support interactive buttons).
- * Each message embeds a short order reference so the customer can reply unambiguously.
+ * Numbered options simulate buttons: customer replies 1 or 2.
  */
 
 export interface OrderMessageData {
@@ -14,19 +14,19 @@ export interface OrderMessageData {
   depositAmountEGP?: number;
 }
 
+// InstaPay number for deposit transfers
+const INSTAPAY_PHONE = process.env.INSTAPAY_PHONE || '01128560748';
+
 function itemsLine(items: Array<{ name: string; quantity: number }>): string {
   return items.map((i) => `  • ${i.name} × ${i.quantity}`).join('\n');
 }
 
 /**
  * Sent immediately after a new order is created.
- * Provides a 1-tap WhatsApp Click-to-Chat confirmation link and supports Arabic text.
+ * Shows two text "buttons": 1️⃣ Confirm  |  2️⃣ Cancel
+ * Customer replies with 1 or 2 (or Arabic keywords).
  */
 export function orderConfirmationRequestTemplate(data: OrderMessageData): string {
-  const botPhone = (process.env.WHATSAPP_BOT_PHONE || '201286198016').replace(/\D/g, '');
-  const encodedText = encodeURIComponent(`تأكيد ${data.orderRef}`);
-  const oneTapLink = `https://wa.me/${botPhone}?text=${encodedText}`;
-
   return [
     `🛍️ مرحباً ${data.customerName}!`,
     ``,
@@ -38,38 +38,41 @@ export function orderConfirmationRequestTemplate(data: OrderMessageData): string
     ``,
     `💰 الإجمالي: *${data.totalEGP.toLocaleString('ar-EG')} EGP*`,
     ``,
-    `👉 *لتأكيد الطلب بضغطة واحدة، اضغط هنا:*`,
-    oneTapLink,
+    `━━━━━━━━━━━━━━━━━━━━━━`,
+    `اختر أحد الخيارات التالية:`,
     ``,
-    `أو يمكنك الرد بكلمة: *تأكيد* أو *CONFIRM ${data.orderRef}*`,
+    `1️⃣  *تأكيد الطلب*`,
+    `  ← اضغط هنا أو أرسل: *1*`,
     ``,
-    `لإلغاء الطلب أو الاستفسار، تفضل بمراسلتنا مباشرة.`,
+    `2️⃣  *إلغاء الطلب*`,
+    `  ← اضغط هنا أو أرسل: *2*`,
+    `━━━━━━━━━━━━━━━━━━━━━━`,
   ].join('\n');
 }
 
 /**
  * Sent after the customer confirms the order.
- * Informs them a deposit is required and instructs them to send the payment screenshot.
+ * Shows InstaPay phone prominently and instructs to send receipt screenshot.
  */
 export function depositRequestTemplate(data: OrderMessageData): string {
   const depositAmount = data.depositAmountEGP && data.depositAmountEGP > 0 ? data.depositAmountEGP : 50;
-  const botPhone = (process.env.WHATSAPP_BOT_PHONE || '201286198016').replace(/\D/g, '');
-  const encodedText = encodeURIComponent(`تأكيد العربون ${data.orderRef}`);
-  const oneTapDepositLink = `https://wa.me/${botPhone}?text=${encodedText}`;
 
   return [
     `✅ تم تأكيد طلبك رقم *${data.orderRef}* بنجاح!`,
     ``,
-    `لمتابعة حجز وتشغيل الطلب، يرجى سداد مقدم (عربون):`,
-    `💰 *${depositAmount.toLocaleString('ar-EG')} EGP*`,
+    `━━━━━━━━━━━━━━━━━━━━━━`,
+    `💳 لتأكيد الحجز، يرجى سداد العربون:`,
     ``,
-    `طرق الدفع المتاحة:`,
-    `📱 فودافون كاش / إنستاباي`,
+    `💰 المبلغ: *${depositAmount.toLocaleString('ar-EG')} EGP*`,
     ``,
-    `📸 *هام جداً*: بعد التحويل، برجاء إرسال **صورة / سكرين شوت إيصال التحويل** هنا في الشات وسيتم تأكيده وإرفاقه بطلبك تلقائياً.`,
+    `📱 *رقم InstaPay / فودافون كاش:*`,
+    `👉 *${INSTAPAY_PHONE}*`,
+    `━━━━━━━━━━━━━━━━━━━━━━`,
     ``,
-    `👉 أو اضغط هنا للتأكيد بدون صورة:`,
-    oneTapDepositLink,
+    `📸 *بعد التحويل:*`,
+    `أرسل *صورة إيصال التحويل* هنا مباشرةً وسيتم تأكيد الطلب تلقائياً ✅`,
+    ``,
+    `شكراً لك! 💜`,
   ].join('\n');
 }
 
@@ -80,7 +83,7 @@ export function depositReceiptReceivedTemplate(orderRef: string, customerName: s
   return [
     `🎉 شكراً ${customerName}!`,
     ``,
-    `تم استلام صورة إيصال العربون لطلبك رقم *${orderRef}* بنجاح!`,
+    `تم استلام صورة إيصال العربون لطلبك رقم *${orderRef}* بنجاح! ✅`,
     `تم إرفاق الإيصال في النظام وتأكيد الحجز، وجاري تجهيز طلبك بعناية. 🌸`,
     ``,
     `سنقوم بإشعارك فور شحن الطلب إليك. نشكرك على ثقتك بنا! 💜`,
@@ -102,6 +105,17 @@ export function depositConfirmedTemplate(orderRef: string, customerName: string)
 }
 
 /**
+ * Sent after the customer cancels via WhatsApp (replies 2 or إلغاء).
+ */
+export function orderCancelledTemplate(orderRef: string, customerName: string): string {
+  return [
+    `❌ تم إلغاء طلبك رقم *${orderRef}*.`,
+    ``,
+    `نأسف لذلك ${customerName}. إذا غيّرت رأيك أو أردت طلب جديد، يسعدنا خدمتك دائماً! 🛍️`,
+  ].join('\n');
+}
+
+/**
  * Sent when the phone matches multiple pending orders.
  */
 export function multipleOrdersTemplate(refs: string[]): string {
@@ -110,7 +124,9 @@ export function multipleOrdersTemplate(refs: string[]): string {
     `لديك أكثر من طلب قيد الانتظار:`,
     list,
     ``,
-    `يرجى الرد بـ: *CONFIRM <رقم الطلب>* (مثال: CONFIRM ORD-A1B2C3)`,
+    `اختر:`,
+    `1️⃣ أرسل *1* لتأكيد أحدث طلب`,
+    `2️⃣ أرسل *2* لإلغاء أحدث طلب`,
   ].join('\n');
 }
 
@@ -126,9 +142,10 @@ export function noOrderFoundTemplate(): string {
  */
 export function unknownCommandTemplate(): string {
   return [
-    `أهلاً بك!`,
-    `• لتأكيد طلبك: أرسل كلمة *تأكيد* أو *CONFIRM*`,
-    `• لإرسال إيصال العربون: أرسل صورة الإيصال (سكرين شوت) مباشرة هنا.`,
+    `أهلاً بك! 👋`,
+    ``,
+    `لتأكيد طلبك: أرسل *1* أو *تأكيد*`,
+    `لإلغاء طلبك: أرسل *2* أو *إلغاء*`,
+    `لتأكيد الدفع: أرسل صورة إيصال التحويل مباشرةً هنا.`,
   ].join('\n');
 }
-

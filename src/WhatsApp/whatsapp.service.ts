@@ -12,6 +12,7 @@ import {
   depositRequestTemplate,
   depositConfirmedTemplate,
   depositReceiptReceivedTemplate,
+  orderCancelledTemplate,
   multipleOrdersTemplate,
   noOrderFoundTemplate,
   unknownCommandTemplate,
@@ -201,12 +202,22 @@ export class WhatsAppService {
       upper.includes('حولتم') ||
       upper.includes('حولت');
 
-    // 3. Order confirmation keywords (Arabic & English)
+    // 3. Order cancel keywords (Arabic & English)
+    const isOrderCancel =
+      upper.trim() === '2' ||
+      upper.startsWith('CANCEL') ||
+      upper.includes('إلغاء') ||
+      upper.includes('الغاء') ||
+      upper.includes('يلغي') ||
+      upper.includes('ملغي') ||
+      upper.trim() === 'لا';
+
+    // 4. Order confirmation keywords (Arabic & English)
     const isOrderConfirm =
+      upper.trim() === '1' ||
       upper.startsWith('CONFIRM') ||
       upper.includes('تأكيد') ||
       upper.includes('تاكيد') ||
-      upper.trim() === '1' ||
       upper.includes('موافق') ||
       upper.includes('نعم') ||
       upper.trim() === 'تم' ||
@@ -214,6 +225,8 @@ export class WhatsAppService {
 
     if (isDepositConfirm) {
       await this.handleDepositConfirm(phone, ref, messageId);
+    } else if (isOrderCancel) {
+      await this.handleOrderCancel(phone, ref, messageId);
     } else if (isOrderConfirm) {
       await this.handleOrderConfirm(phone, ref, messageId);
     } else {
@@ -263,6 +276,44 @@ export class WhatsAppService {
       depositAmountEGP: order.deposit ?? 0,
     };
     await this.safeSend(phone, depositRequestTemplate(data));
+  }
+
+  /**
+   * Handle "2" / "إلغاء" message — cancel the pending order.
+   * Idempotent: if already cancelled, silently returns.
+   */
+  async handleOrderCancel(phone: string, ref: string | null, messageId: string): Promise<void> {
+    // Look in both pending and pending_deposit status
+    let order = await this.findEligibleOrder(phone, OrderStatus.pending, ref, true);
+    if (!order) {
+      order = await this.findEligibleOrder(phone, OrderStatus.pending_deposit, ref, true);
+    }
+    if (!order) {
+      await this.safeSend(phone, noOrderFoundTemplate());
+      return;
+    }
+
+    // Idempotency: already cancelled
+    if (order.status === OrderStatus.cancelled) {
+      this.logger.debug(`[handleOrderCancel] Order ${order._id} already cancelled, skipping.`);
+      return;
+    }
+
+    order.status = OrderStatus.cancelled;
+    (order as any).whatsappConfirmation = {
+      ...(order.whatsappConfirmation || {}),
+      cancelledVia: 'whatsapp',
+      cancelledAt: new Date(),
+      whatsappPhone: phone,
+      whatsappMessageId: messageId,
+    };
+    await order.save();
+
+    this.logger.log(`[handleOrderCancel] Order ${order._id} cancelled via WhatsApp by ${phone}`);
+
+    const orderRef = buildOrderRef(String((order as any)._id));
+    const customerName = order.firstName || 'عزيزي العميل';
+    await this.safeSend(phone, orderCancelledTemplate(orderRef, customerName));
   }
 
   /**

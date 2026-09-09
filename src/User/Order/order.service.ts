@@ -16,6 +16,7 @@ import Stripe from "stripe";
 import { PaymobService } from "src/Payment/paymob.service";
 import { UserRepository } from "src/DB/models/User/user.repository";
 import { emailEvent } from "src/common/Utility/email.event";
+import { whatsappEvent } from "src/WhatsApp/whatsapp.event";
 import { emit } from "process";
 import { ShippingRepository } from "src/DB/models/Shipping/shipping.repository";
 
@@ -128,6 +129,8 @@ export class OrderService {
             }
             emailEvent.emit("CreateOrder", { email: req["user"].email, order, userName: req["user"].name })
             emailEvent.emit("CreateOrderAdmin", { email: process.env.EMAIL, order, userName: req["user"].name, customerEmail: req["user"].email, phone: order.phone, address: order.address, products: order.products })
+            // Fire-and-forget: WhatsApp confirmation message (never blocks order creation)
+            whatsappEvent.emit("OrderCreated", { order })
             return { order }
         } catch (error) {
             if (error instanceof HttpException) {
@@ -349,6 +352,8 @@ export class OrderService {
             }
             emailEvent.emit("CreateOrder", { email: order.email, order, userName: order.firstName + " " + order.lastName })
             emailEvent.emit("CreateOrderAdmin", { email: process.env.EMAIL, order, userName: order.firstName + " " + order.lastName, customerEmail: order.email, phone: order.phone, address: order.address, products: order.products })
+            // Fire-and-forget: WhatsApp confirmation message (never blocks order creation)
+            whatsappEvent.emit("OrderCreated", { order })
             return order
         } catch (error) {
             if (error instanceof HttpException) {

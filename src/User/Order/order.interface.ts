@@ -3,10 +3,25 @@ import { Types } from "mongoose";
 
 export enum OrderStatus {
     pending="pending",
+    pending_deposit="pending_deposit",
     placed="placed",
     onWay="on_way",
     cancelled="cancelled",
     delivered="delivered",
+}
+
+export interface IWhatsAppConfirmation {
+    confirmedVia: 'whatsapp';
+    confirmedAt: Date;
+    whatsappPhone: string;
+    whatsappMessageId: string;
+}
+
+export interface IDepositConfirmation {
+    depositConfirmed: boolean;
+    confirmedVia: 'whatsapp';
+    confirmedAt: Date;
+    whatsappMessageId: string;
 }
 
 

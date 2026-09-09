@@ -1,7 +1,7 @@
 import { MongooseModule, Prop, raw, Schema, SchemaFactory } from "@nestjs/mongoose";
 import { Document, SchemaTypes, Types } from "mongoose";
 import { ICartProduct } from "src/User/Cart/cart.interface";
-import { IOrder, IorderProduct, OrderStatus, PaymentWay } from "src/User/Order/order.interface";
+import { IDepositConfirmation, IOrder, IorderProduct, IWhatsAppConfirmation, OrderStatus, PaymentWay } from "src/User/Order/order.interface";
 
 
 
@@ -86,6 +86,24 @@ export class Order {
         public_id: { type: String, required: false }
     }))
     depositReceipt?: { secure_url: string; public_id: string };
+
+    // ─── WhatsApp Confirmation ───────────────────────────────────────────────────
+    @Prop(raw({
+        confirmedVia: { type: String, default: 'whatsapp' },
+        confirmedAt: { type: Date },
+        whatsappPhone: { type: String },
+        whatsappMessageId: { type: String },
+    }))
+    whatsappConfirmation?: IWhatsAppConfirmation;
+
+    // ─── Deposit Confirmation via WhatsApp ───────────────────────────────────────
+    @Prop(raw({
+        depositConfirmed: { type: Boolean, default: false },
+        confirmedVia: { type: String, default: 'whatsapp' },
+        confirmedAt: { type: Date },
+        whatsappMessageId: { type: String },
+    }))
+    depositConfirmation?: IDepositConfirmation;
 
 }
 

@@ -13,6 +13,7 @@ import { SupportModule } from './Support/support.module';
 import { ShippingModule } from './Shipping/shipping.module';
 import { AnnouncementModule } from './Announcement/announcement.module';
 import { SocialOrderModule } from './SocialOrder/social-order.module';
+import { WhatsAppModule } from './WhatsApp/whatsapp.module';
 import { CacheModule } from '@nestjs/cache-manager';
 import { createKeyv } from '@keyv/redis';
 import { AppController } from './app.controller';
@@ -48,6 +49,7 @@ if (!databaseUrl) {
     ShippingModule,
     AnnouncementModule,
     SocialOrderModule,
+    WhatsAppModule,
   ],
   providers: [],
 })

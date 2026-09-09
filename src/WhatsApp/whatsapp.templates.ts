@@ -14,6 +14,9 @@ export interface OrderMessageData {
   depositAmountEGP?: number;
 }
 
+// Bot WhatsApp phone for wa.me links
+const BOT_PHONE = process.env.WHATSAPP_BOT_PHONE || '201286198016';
+
 // InstaPay number for deposit transfers
 const INSTAPAY_PHONE = process.env.INSTAPAY_PHONE || '01128560748';
 
@@ -22,11 +25,23 @@ function itemsLine(items: Array<{ name: string; quantity: number }>): string {
 }
 
 /**
+ * Returns interactive buttons array for the confirmation template.
+ */
+export function getConfirmationButtons(data: OrderMessageData): Array<{ id: string; text: string }> {
+  return [
+    { id: '1', text: '✅ تأكيد الطلب' },
+    { id: '2', text: '❌ إلغاء الطلب' },
+  ];
+}
+
+/**
  * Sent immediately after a new order is created.
- * Shows two text "buttons": 1️⃣ Confirm  |  2️⃣ Cancel
- * Customer replies with 1 or 2 (or Arabic keywords).
+ * Supports interactive buttons and includes clickable wa.me direct links in text.
  */
 export function orderConfirmationRequestTemplate(data: OrderMessageData): string {
+  const confirmLink = `https://wa.me/${BOT_PHONE}?text=${encodeURIComponent(`تأكيد ${data.orderRef}`)}`;
+  const cancelLink = `https://wa.me/${BOT_PHONE}?text=${encodeURIComponent(`إلغاء ${data.orderRef}`)}`;
+
   return [
     `🛍️ مرحباً ${data.customerName}!`,
     ``,
@@ -39,13 +54,15 @@ export function orderConfirmationRequestTemplate(data: OrderMessageData): string
     `💰 الإجمالي: *${data.totalEGP.toLocaleString('ar-EG')} EGP*`,
     ``,
     `━━━━━━━━━━━━━━━━━━━━━━`,
-    `اختر أحد الخيارات التالية:`,
+    `لتأكيد طلبك أو إلغائه، اختر أحد الخيارات:`,
     ``,
-    `1️⃣  *تأكيد الطلب*`,
-    `  ← اضغط هنا أو أرسل: *1*`,
+    `✅ *تأكيد الطلب اضغط هنا:*`,
+    confirmLink,
     ``,
-    `2️⃣  *إلغاء الطلب*`,
-    `  ← اضغط هنا أو أرسل: *2*`,
+    `❌ *إلغاء الطلب اضغط هنا:*`,
+    cancelLink,
+    ``,
+    `أو يمكنك الرد برقم: *1* للتأكيد أو *2* للإلغاء`,
     `━━━━━━━━━━━━━━━━━━━━━━`,
   ].join('\n');
 }

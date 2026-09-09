@@ -9,6 +9,7 @@ import { join } from 'path';
 import { WhatsAppClient } from './whatsapp.client';
 import {
   orderConfirmationRequestTemplate,
+  getConfirmationButtons,
   depositRequestTemplate,
   depositConfirmedTemplate,
   depositReceiptReceivedTemplate,
@@ -23,8 +24,8 @@ import {
 
 /**
  * Convert an Egyptian or E.164 phone number to E.164 (+20XXXXXXXXXX).
- * Strips spaces, dashes, and parentheses.
- * Handles formats: 01001234567 / +201001234567 / 00201001234567
+ * Strips all non-digit characters except leading '+'.
+ * Handles formats: 01001234567 / +201001234567 / 00201001234567 / 201001234567 / 1001234567
  */
 export function normalizeEgyptianPhone(raw: string): string | null {
   if (!raw) return null;
@@ -32,19 +33,33 @@ export function normalizeEgyptianPhone(raw: string): string | null {
 
   // Already E.164 with + prefix
   if (phone.startsWith('+')) {
-    return phone.length >= 10 ? phone : null;
+    const digits = phone.slice(1).replace(/\D/g, '');
+    return digits.length >= 10 ? `+${digits}` : null;
   }
   // International without + (0020...)
   if (phone.startsWith('00')) {
-    return '+' + phone.slice(2);
+    const digits = phone.slice(2).replace(/\D/g, '');
+    return `+${digits}`;
+  }
+  // Egyptian with country code (201...)
+  if (phone.startsWith('20') && phone.length >= 12) {
+    const digits = phone.replace(/\D/g, '');
+    return `+${digits}`;
   }
   // Egyptian local starting with 0 (01...)
-  if (phone.startsWith('0')) {
-    return '+20' + phone.slice(1);
+  if (phone.startsWith('0') && phone.length >= 11) {
+    const digits = phone.replace(/\D/g, '');
+    return `+20${digits.slice(1)}`;
   }
-  // Bare number starting with 1 (Egyptian mobile)
+  // Bare number starting with 1 (Egyptian mobile, 10 digits)
   if (phone.startsWith('1') && phone.length === 10) {
-    return '+20' + phone;
+    const digits = phone.replace(/\D/g, '');
+    return `+20${digits}`;
+  }
+
+  const allDigits = phone.replace(/\D/g, '');
+  if (allDigits.length >= 10) {
+    return `+${allDigits}`;
   }
   return null;
 }
@@ -53,8 +68,7 @@ export function normalizeEgyptianPhone(raw: string): string | null {
 
 /**
  * Generate a short, human-readable reference from a MongoDB ObjectId string.
- * Uses the last 6 hex characters uppercased — collision probability is negligible
- * within the active order window.
+ * Uses the last 6 hex characters uppercased.
  * Example: "ORD-A1B2C3"
  */
 export function buildOrderRef(orderId: string): string {
@@ -65,7 +79,8 @@ export function buildOrderRef(orderId: string): string {
 /**
  * Extract a REF-XXXX pattern from an incoming WhatsApp message body.
  */
-function extractOrderRef(text: string): string | null {
+export function extractOrderRef(text: string): string | null {
+  if (!text) return null;
   const match = text.match(/ORD-([A-F0-9]{6})/i);
   return match ? `ORD-${match[1].toUpperCase()}` : null;
 }
@@ -87,6 +102,7 @@ export class WhatsAppService {
 
   /**
    * Called after a new order is successfully created.
+   * Sends interactive button message (with fallback to text + wa.me links).
    * Fire-and-forget: failures are logged but never re-thrown.
    */
   async sendOrderConfirmationMessage(order: typeOrder): Promise<void> {
@@ -109,7 +125,15 @@ export class WhatsAppService {
       };
 
       const message = orderConfirmationRequestTemplate(data);
-      const result = await this.client.sendTextMessage(phone, message, 1);
+      const buttons = getConfirmationButtons(data);
+
+      const result = await this.client.sendButtonMessage(
+        phone,
+        message,
+        buttons,
+        'Extra Chic Store',
+        1,
+      );
       this.logger.log(`[sendOrderConfirmationMessage] Sent to ${phone}, ref=${orderRef}, result=${JSON.stringify(result?.status)}`);
     } catch (err) {
       this.logger.error(`[sendOrderConfirmationMessage] Failed for order ${order._id}:`, err?.message ?? err);
@@ -170,6 +194,8 @@ export class WhatsAppService {
       ''
     ).toString().trim();
 
+    this.logger.log(`[processMessage] Inbound: rawPhone="${rawPhone}", body="${body}", attachment="${attachmentUrl}"`);
+
     if (!rawPhone || (!body && !attachmentUrl)) {
       this.logger.debug('[processMessage] Missing phone or payload content, skipping.');
       return;
@@ -206,22 +232,26 @@ export class WhatsAppService {
     const isOrderCancel =
       upper.trim() === '2' ||
       upper.startsWith('CANCEL') ||
+      upper.includes('CANCEL') ||
       upper.includes('إلغاء') ||
       upper.includes('الغاء') ||
       upper.includes('يلغي') ||
       upper.includes('ملغي') ||
-      upper.trim() === 'لا';
+      upper.trim() === 'لا' ||
+      upper.includes('مش عايز');
 
     // 4. Order confirmation keywords (Arabic & English)
     const isOrderConfirm =
       upper.trim() === '1' ||
       upper.startsWith('CONFIRM') ||
+      upper.includes('CONFIRM') ||
       upper.includes('تأكيد') ||
       upper.includes('تاكيد') ||
       upper.includes('موافق') ||
       upper.includes('نعم') ||
       upper.trim() === 'تم' ||
-      upper.includes('تمام');
+      upper.includes('تمام') ||
+      /^ORD-[A-F0-9]{6}$/i.test(body.trim());
 
     if (isDepositConfirm) {
       await this.handleDepositConfirm(phone, ref, messageId);
@@ -240,16 +270,30 @@ export class WhatsAppService {
   // ──────────────────────────────────────────────────────────────────────────
 
   /**
-   * Handle "CONFIRM [ref]" message.
-   * Idempotent: if order already confirmed, silently returns.
+   * Handle "CONFIRM [ref]" / "تأكيد [ref]" / "1" message.
+   * If already pending_deposit, re-sends deposit instructions.
    */
   async handleOrderConfirm(phone: string, ref: string | null, messageId: string): Promise<void> {
-    const order = await this.findEligibleOrder(phone, OrderStatus.pending, ref);
+    const order = await this.findEligibleOrder(
+      phone,
+      [OrderStatus.pending, OrderStatus.pending_deposit],
+      ref,
+    );
     if (!order) return;
 
-    // Idempotency: already confirmed
-    if (order.whatsappConfirmation?.confirmedAt) {
-      this.logger.debug(`[handleOrderConfirm] Order ${order._id} already confirmed, skipping.`);
+    // If order was already confirmed and awaiting deposit, re-send deposit instructions
+    if (order.status === OrderStatus.pending_deposit || order.whatsappConfirmation?.confirmedAt) {
+      this.logger.log(`[handleOrderConfirm] Order ${order._id} already confirmed/pending_deposit, re-sending deposit request.`);
+      const orderRef = buildOrderRef(String((order as any)._id));
+      const items = (order.products || []).map((p) => ({ name: p.name, quantity: p.quantity }));
+      const data: OrderMessageData = {
+        orderRef,
+        customerName: order.firstName || 'عزيزي العميل',
+        totalEGP: order.finalPrice,
+        items,
+        depositAmountEGP: order.deposit ?? 0,
+      };
+      await this.safeSend(phone, depositRequestTemplate(data));
       return;
     }
 
@@ -283,11 +327,13 @@ export class WhatsAppService {
    * Idempotent: if already cancelled, silently returns.
    */
   async handleOrderCancel(phone: string, ref: string | null, messageId: string): Promise<void> {
-    // Look in both pending and pending_deposit status
-    let order = await this.findEligibleOrder(phone, OrderStatus.pending, ref, true);
-    if (!order) {
-      order = await this.findEligibleOrder(phone, OrderStatus.pending_deposit, ref, true);
-    }
+    let order = await this.findEligibleOrder(
+      phone,
+      [OrderStatus.pending, OrderStatus.pending_deposit],
+      ref,
+      true,
+    );
+
     if (!order) {
       await this.safeSend(phone, noOrderFoundTemplate());
       return;
@@ -321,7 +367,11 @@ export class WhatsAppService {
    * Idempotent: if deposit already confirmed, silently returns.
    */
   async handleDepositConfirm(phone: string, ref: string | null, messageId: string): Promise<void> {
-    const order = await this.findEligibleOrder(phone, OrderStatus.pending_deposit, ref);
+    const order = await this.findEligibleOrder(
+      phone,
+      [OrderStatus.pending_deposit, OrderStatus.pending],
+      ref,
+    );
     if (!order) return;
 
     // Idempotency: already deposit-confirmed
@@ -356,11 +406,13 @@ export class WhatsAppService {
     ref: string | null,
     messageId: string,
   ): Promise<void> {
-    // Look for pending_deposit order first, or pending order
-    let order = await this.findEligibleOrder(phone, OrderStatus.pending_deposit, ref, true);
-    if (!order) {
-      order = await this.findEligibleOrder(phone, OrderStatus.pending, ref, true);
-    }
+    let order = await this.findEligibleOrder(
+      phone,
+      [OrderStatus.pending_deposit, OrderStatus.pending],
+      ref,
+      true,
+    );
+
     if (!order) {
       this.logger.warn(`[handleDepositScreenshot] No order awaiting deposit found for ${phone}`);
       await this.safeSend(phone, noOrderFoundTemplate());
@@ -438,37 +490,64 @@ export class WhatsAppService {
   // ──────────────────────────────────────────────────────────────────────────
 
   /**
-   * Find the correct pending order for a given phone + status.
-   * If a ref is provided, match it against the order ObjectId suffix.
-   * If multiple orders exist without a ref, prompt the user to specify.
-   * Returns null if nothing actionable is found (after sending an appropriate reply).
+   * Find the correct order for a given phone + status (or statuses).
+   * 1. If ref is provided, looks up order directly by ObjectId 6-char hex suffix.
+   * 2. Otherwise searches by phone (all candidate formats + regex).
    */
   private async findEligibleOrder(
     phone: string,
-    status: OrderStatus,
+    status: OrderStatus | OrderStatus[],
     ref: string | null,
     silent = false,
   ): Promise<typeOrder | null> {
-    // Normalize phone variants to search against stored phone values
-    // The DB may store local (01...) or E.164 (+20...)
+    const statusArray = Array.isArray(status) ? status : [status];
+
+    // 1. If ref is provided (e.g. ORD-F7FDB7), match directly by ObjectId suffix
+    if (ref) {
+      const suffix = ref.replace('ORD-', '').trim().toUpperCase();
+      const recentOrders = await this.orderModel
+        .find({ status: { $in: statusArray } })
+        .sort({ createdAt: -1 })
+        .limit(100)
+        .exec();
+
+      const matchedByRef = recentOrders.find((o) =>
+        String((o as any)._id).toUpperCase().endsWith(suffix),
+      );
+
+      if (matchedByRef) {
+        return matchedByRef;
+      }
+    }
+
+    // 2. Search by phone conditions
     const possiblePhones = this.phoneCandidates(phone);
+    const rawDigits = phone.replace(/\D/g, '');
+    const last9 = rawDigits.slice(-9);
+
+    const phoneConditions: any[] = [{ phone: { $in: possiblePhones } }];
+    if (last9.length === 9) {
+      phoneConditions.push({ phone: { $regex: last9 } });
+    }
 
     const orders = await this.orderModel
-      .find({ phone: { $in: possiblePhones }, status })
+      .find({
+        $or: phoneConditions,
+        status: { $in: statusArray },
+      })
       .sort({ createdAt: -1 })
       .exec();
 
     if (orders.length === 0) {
       if (!silent) {
-        this.logger.warn(`[findEligibleOrder] No ${status} order found for phone ${phone}`);
+        this.logger.warn(`[findEligibleOrder] No order with status [${statusArray.join(', ')}] found for phone ${phone}`);
         await this.safeSend(phone, noOrderFoundTemplate());
       }
       return null;
     }
 
     if (ref) {
-      // Match by last 6 hex chars of ObjectId
-      const suffix = ref.replace('ORD-', '').toUpperCase();
+      const suffix = ref.replace('ORD-', '').trim().toUpperCase();
       const matched = orders.find((o) => String((o as any)._id).toUpperCase().endsWith(suffix));
       if (!matched) {
         if (!silent) {
@@ -480,7 +559,7 @@ export class WhatsAppService {
       return matched;
     }
 
-    // No ref provided
+    // No ref provided and exactly 1 order
     if (orders.length === 1) {
       return orders[0];
     }
@@ -493,14 +572,34 @@ export class WhatsAppService {
 
   /**
    * Build phone number variants to search in DB.
-   * Covers E.164 (+20...) and local Egyptian (01...) formats.
+   * Covers E.164 (+20...), local Egyptian (01...), bare digits, 0020... formats.
    */
   private phoneCandidates(e164: string): string[] {
-    const candidates: string[] = [e164];
-    if (e164.startsWith('+20')) {
-      candidates.push('0' + e164.slice(3)); // 01XXXXXXXXX
+    const rawDigits = e164.replace(/\D/g, '');
+    const list = new Set<string>();
+
+    list.add(e164);
+    if (rawDigits) {
+      list.add(rawDigits);
+      list.add(`+${rawDigits}`);
+      // If Egyptian (country code 20)
+      if (rawDigits.startsWith('20') && rawDigits.length >= 12) {
+        const local = '0' + rawDigits.slice(2);
+        list.add(local);
+        list.add(`+20${rawDigits.slice(2)}`);
+        list.add(`0020${rawDigits.slice(2)}`);
+        list.add(rawDigits.slice(2)); // bare 10 digits
+      }
+      // If starts with 0 (local 01...)
+      if (rawDigits.startsWith('0') && rawDigits.length >= 11) {
+        list.add(`+20${rawDigits.slice(1)}`);
+        list.add(`20${rawDigits.slice(1)}`);
+        list.add(`0020${rawDigits.slice(1)}`);
+        list.add(rawDigits.slice(1)); // bare 10 digits
+      }
     }
-    return candidates;
+
+    return Array.from(list);
   }
 
   /**

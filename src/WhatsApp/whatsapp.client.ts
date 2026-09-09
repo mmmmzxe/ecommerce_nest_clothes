@@ -51,6 +51,56 @@ export class WhatsAppClient {
   }
 
   /**
+   * Send a WhatsApp message with interactive buttons.
+   * Sends type=button with button items and falls back to sendTextMessage if needed.
+   */
+  async sendButtonMessage(
+    recipient: string,
+    message: string,
+    buttons: Array<{ id: string; text: string }>,
+    footer?: string,
+    priority: 1 | 2 = 1,
+  ): Promise<any> {
+    try {
+      const form = new URLSearchParams();
+      form.append('secret', this.secret);
+      form.append('account', this.accountUniqueId);
+      form.append('recipient', recipient);
+      form.append('type', 'button');
+      form.append('message', message);
+      if (footer) form.append('footer', footer);
+
+      buttons.forEach((btn, index) => {
+        form.append(`button_${index + 1}`, btn.text);
+        form.append(`button${index + 1}`, btn.text);
+      });
+      form.append(
+        'buttons',
+        JSON.stringify(buttons.map((b) => ({ id: b.id, text: b.text, displayText: b.text }))),
+      );
+      form.append('priority', String(priority));
+
+      const response = await fetch(`${this.baseURL}/send/whatsapp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: form.toString(),
+        signal: AbortSignal.timeout(15_000),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => '');
+        console.warn(`[WhatsAppClient] Button message failed (${response.status}: ${errorText}), falling back to text`);
+        return this.sendTextMessage(recipient, message, priority);
+      }
+
+      return response.json();
+    } catch (err) {
+      console.warn(`[WhatsAppClient] sendButtonMessage exception, falling back to text:`, err?.message ?? err);
+      return this.sendTextMessage(recipient, message, priority);
+    }
+  }
+
+  /**
    * Retrieve a list of WhatsApp accounts linked to this API key.
    */
   async getAccounts(): Promise<any> {

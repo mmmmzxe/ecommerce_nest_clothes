@@ -23,8 +23,8 @@ function itemsLine(items: Array<{ name: string; quantity: number }>): string {
  * Provides a 1-tap WhatsApp Click-to-Chat confirmation link and supports Arabic text.
  */
 export function orderConfirmationRequestTemplate(data: OrderMessageData): string {
-  const botPhone = (process.env.WHATSAPP_BOT_PHONE || '201128560748').replace(/\D/g, '');
-  const encodedText = encodeURIComponent(`CONFIRM ${data.orderRef}`);
+  const botPhone = (process.env.WHATSAPP_BOT_PHONE || '201286198016').replace(/\D/g, '');
+  const encodedText = encodeURIComponent(`تأكيد ${data.orderRef}`);
   const oneTapLink = `https://wa.me/${botPhone}?text=${encodedText}`;
 
   return [
@@ -41,7 +41,7 @@ export function orderConfirmationRequestTemplate(data: OrderMessageData): string
     `👉 *لتأكيد الطلب بضغطة واحدة، اضغط هنا:*`,
     oneTapLink,
     ``,
-    `أو يمكنك الرد مباشرة بكلمة: *تأكيد* أو *CONFIRM ${data.orderRef}*`,
+    `أو يمكنك الرد بكلمة: *تأكيد* أو *CONFIRM ${data.orderRef}*`,
     ``,
     `لإلغاء الطلب أو الاستفسار، تفضل بمراسلتنا مباشرة.`,
   ].join('\n');
@@ -53,8 +53,8 @@ export function orderConfirmationRequestTemplate(data: OrderMessageData): string
  */
 export function depositRequestTemplate(data: OrderMessageData): string {
   const depositAmount = data.depositAmountEGP && data.depositAmountEGP > 0 ? data.depositAmountEGP : 50;
-  const botPhone = (process.env.WHATSAPP_BOT_PHONE || '201128560748').replace(/\D/g, '');
-  const encodedText = encodeURIComponent(`CONFIRM_DEPOSIT ${data.orderRef}`);
+  const botPhone = (process.env.WHATSAPP_BOT_PHONE || '201286198016').replace(/\D/g, '');
+  const encodedText = encodeURIComponent(`تأكيد العربون ${data.orderRef}`);
   const oneTapDepositLink = `https://wa.me/${botPhone}?text=${encodedText}`;
 
   return [

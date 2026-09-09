@@ -17,6 +17,7 @@ async function bootstrap() {
   app.setGlobalPrefix('api');
   app.enableCors()
   app.use("/paymob/webhook", express.raw({ type: 'application/json' }))
+  app.use(express.urlencoded({ extended: true }))
   app.useStaticAssets(join(process.cwd(), 'uploads'), { prefix: '/api/uploads' })
   await app.listen(process.env.PORT ?? 3000);
 }

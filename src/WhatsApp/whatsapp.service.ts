@@ -125,12 +125,26 @@ export class WhatsAppService {
    */
   async handleIncomingMessage(payload: any): Promise<void> {
     try {
-      // Hashtag webhook delivers an array under `data` or a single object
-      const messages: any[] = Array.isArray(payload?.data)
-        ? payload.data
-        : payload?.data
-        ? [payload.data]
-        : [];
+      this.logger.debug(`[handleIncomingMessage] raw payload keys: ${Object.keys(payload || {}).join(', ')}`);
+
+      let messages: any[] = [];
+
+      if (Array.isArray(payload)) {
+        // Root-level array of messages
+        messages = payload;
+      } else if (Array.isArray(payload?.data)) {
+        // Hashtag wraps in { data: [...] }
+        messages = payload.data;
+      } else if (payload?.data && typeof payload.data === 'object') {
+        // Single message under { data: {...} }
+        messages = [payload.data];
+      } else if (payload?.account || payload?.phone || payload?.message !== undefined) {
+        // Message object delivered directly at root level
+        messages = [payload];
+      } else {
+        this.logger.warn('[handleIncomingMessage] Could not extract messages from payload, skipping.');
+        return;
+      }
 
       for (const msg of messages) {
         await this.processMessage(msg);

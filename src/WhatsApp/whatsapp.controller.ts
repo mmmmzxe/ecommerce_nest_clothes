@@ -1,5 +1,6 @@
 import {
   Controller,
+  Get,
   Post,
   Body,
   Query,
@@ -67,5 +68,19 @@ export class WhatsAppController {
     });
 
     return { ok: true };
+  }
+
+  /**
+   * GET /api/whatsapp/webhook
+   *
+   * Some webhook platforms (and Hashtag dashboard) send a GET request to verify
+   * the URL is reachable before activating. Return 200 + hub.challenge (if any).
+   */
+  @Public('public')
+  @Get('webhook')
+  @HttpCode(HttpStatus.OK)
+  verifyWebhook(@Query() query: Record<string, string>): string {
+    this.logger.log('[webhook] GET verification ping received');
+    return query['hub.challenge'] || 'OK';
   }
 }

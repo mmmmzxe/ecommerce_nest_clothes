@@ -14,6 +14,8 @@ import {
   depositConfirmedTemplate,
   depositReceiptReceivedTemplate,
   orderCancelledTemplate,
+  orderAlreadyCancelledTemplate,
+  orderAlreadyConfirmedTemplate,
   multipleOrdersTemplate,
   noOrderFoundTemplate,
   unknownCommandTemplate,
@@ -505,18 +507,38 @@ export class WhatsAppService {
     // 1. If ref is provided (e.g. ORD-F7FDB7), match directly by ObjectId suffix
     if (ref) {
       const suffix = ref.replace('ORD-', '').trim().toUpperCase();
-      const recentOrders = await this.orderModel
-        .find({ status: { $in: statusArray } })
+      const allOrders = await this.orderModel
+        .find({})
         .sort({ createdAt: -1 })
         .limit(100)
         .exec();
 
-      const matchedByRef = recentOrders.find((o) =>
+      const matchedByRef = allOrders.find((o) =>
         String((o as any)._id).toUpperCase().endsWith(suffix),
       );
 
       if (matchedByRef) {
-        return matchedByRef;
+        if (statusArray.includes(matchedByRef.status)) {
+          return matchedByRef;
+        }
+        if (matchedByRef.status === OrderStatus.cancelled) {
+          if (!silent) {
+            this.logger.log(`[findEligibleOrder] Order ${ref} is already cancelled.`);
+            await this.safeSend(phone, orderAlreadyCancelledTemplate(ref));
+          }
+          return null;
+        }
+        if (
+          matchedByRef.status === OrderStatus.placed ||
+          matchedByRef.status === OrderStatus.onWay ||
+          matchedByRef.status === OrderStatus.delivered
+        ) {
+          if (!silent) {
+            this.logger.log(`[findEligibleOrder] Order ${ref} is already active/completed (${matchedByRef.status}).`);
+            await this.safeSend(phone, orderAlreadyConfirmedTemplate(ref));
+          }
+          return null;
+        }
       }
     }
 

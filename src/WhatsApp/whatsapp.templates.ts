@@ -148,6 +148,28 @@ export function multipleOrdersTemplate(refs: string[]): string {
 }
 
 /**
+ * Sent when customer tries to take action on an already cancelled order.
+ */
+export function orderAlreadyCancelledTemplate(orderRef: string): string {
+  return [
+    `طلبك رقم *${orderRef}* ملغي بالفعل مسبقاً ❌.`,
+    ``,
+    `إذا كنت ترغب في عمل طلب جديد، نسعد بخدمتك دائماً من خلال موقعنا! 🛍️`,
+  ].join('\n');
+}
+
+/**
+ * Sent when customer tries to confirm an order that is already confirmed and active.
+ */
+export function orderAlreadyConfirmedTemplate(orderRef: string): string {
+  return [
+    `طلبك رقم *${orderRef}* مؤكد بالفعل وجاري تجهيزه للشحن والتوصيل! 🚚📦`,
+    ``,
+    `سنقوم بإشعارك بأي تحديثات قادمة فور شحن الطلب. نشكرك على ثقتك بنا! 💜`,
+  ].join('\n');
+}
+
+/**
  * Sent when no eligible order is found for the phone number.
  */
 export function noOrderFoundTemplate(): string {

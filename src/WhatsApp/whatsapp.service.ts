@@ -4,11 +4,14 @@ import { Model } from 'mongoose';
 import { Order } from 'src/DB/models/Order/order.model';
 import { typeOrder } from 'src/DB/models/Order/order.model';
 import { OrderStatus } from 'src/User/Order/order.interface';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { join } from 'path';
 import { WhatsAppClient } from './whatsapp.client';
 import {
   orderConfirmationRequestTemplate,
   depositRequestTemplate,
   depositConfirmedTemplate,
+  depositReceiptReceivedTemplate,
   multipleOrdersTemplate,
   noOrderFoundTemplate,
   unknownCommandTemplate,
@@ -138,13 +141,22 @@ export class WhatsAppService {
   }
 
   private async processMessage(msg: any): Promise<void> {
-    // Hashtag received chat shape: { id, account (sender), message, ... }
+    // Hashtag received chat shape: { id, account (sender), message, attachment, ... }
     const rawPhone: string = msg?.account || msg?.phone || '';
     const body: string = (msg?.message || '').trim();
     const messageId: string = String(msg?.id || '');
+    const attachmentUrl: string = (
+      msg?.attachment ||
+      msg?.media_url ||
+      msg?.media ||
+      msg?.file ||
+      msg?.image ||
+      msg?.url ||
+      ''
+    ).toString().trim();
 
-    if (!rawPhone || !body) {
-      this.logger.debug('[processMessage] Missing phone or body, skipping.');
+    if (!rawPhone || (!body && !attachmentUrl)) {
+      this.logger.debug('[processMessage] Missing phone or payload content, skipping.');
       return;
     }
 
@@ -154,13 +166,41 @@ export class WhatsAppService {
       return;
     }
 
+    const ref = extractOrderRef(body);
     const upper = body.toUpperCase();
 
-    if (upper.startsWith('CONFIRM_DEPOSIT')) {
-      const ref = extractOrderRef(body);
+    // 1. If an image/attachment is present -> it's the deposit receipt screenshot!
+    if (attachmentUrl && attachmentUrl !== 'false') {
+      this.logger.log(`[processMessage] Detected receipt screenshot from ${phone}: ${attachmentUrl}`);
+      await this.handleDepositScreenshot(phone, attachmentUrl, ref, messageId);
+      return;
+    }
+
+    // 2. Deposit confirmation keywords (Arabic & English)
+    const isDepositConfirm =
+      upper.startsWith('CONFIRM_DEPOSIT') ||
+      upper.includes('تأكيد العربون') ||
+      upper.includes('تاكيد العربون') ||
+      upper.includes('تم التحويل') ||
+      upper.includes('تم الدفع') ||
+      upper.includes('دفعت') ||
+      upper.includes('حولتم') ||
+      upper.includes('حولت');
+
+    // 3. Order confirmation keywords (Arabic & English)
+    const isOrderConfirm =
+      upper.startsWith('CONFIRM') ||
+      upper.includes('تأكيد') ||
+      upper.includes('تاكيد') ||
+      upper.trim() === '1' ||
+      upper.includes('موافق') ||
+      upper.includes('نعم') ||
+      upper.trim() === 'تم' ||
+      upper.includes('تمام');
+
+    if (isDepositConfirm) {
       await this.handleDepositConfirm(phone, ref, messageId);
-    } else if (upper.startsWith('CONFIRM')) {
-      const ref = extractOrderRef(body);
+    } else if (isOrderConfirm) {
       await this.handleOrderConfirm(phone, ref, messageId);
     } else {
       this.logger.debug(`[processMessage] Unrecognised command from ${phone}: "${body.slice(0, 50)}"`);
@@ -240,6 +280,94 @@ export class WhatsAppService {
     await this.safeSend(phone, depositConfirmedTemplate(orderRef, customerName));
   }
 
+  /**
+   * Handle incoming deposit screenshot from WhatsApp.
+   * Downloads image, stores it to local uploads/receipts, updates order.depositReceipt,
+   * sets depositConfirmed: true, and notifies customer.
+   */
+  async handleDepositScreenshot(
+    phone: string,
+    imageUrl: string,
+    ref: string | null,
+    messageId: string,
+  ): Promise<void> {
+    // Look for pending_deposit order first, or pending order
+    let order = await this.findEligibleOrder(phone, OrderStatus.pending_deposit, ref, true);
+    if (!order) {
+      order = await this.findEligibleOrder(phone, OrderStatus.pending, ref, true);
+    }
+    if (!order) {
+      this.logger.warn(`[handleDepositScreenshot] No order awaiting deposit found for ${phone}`);
+      await this.safeSend(phone, noOrderFoundTemplate());
+      return;
+    }
+
+    try {
+      const savedPath = await this.downloadAndSaveReceipt(imageUrl);
+
+      order.depositReceipt = {
+        secure_url: savedPath,
+        public_id: savedPath,
+      };
+      order.status = OrderStatus.pending_deposit;
+      (order as any).depositConfirmation = {
+        depositConfirmed: true,
+        confirmedVia: 'whatsapp',
+        confirmedAt: new Date(),
+        whatsappMessageId: messageId,
+      };
+
+      // Also ensure whatsappConfirmation is marked if not already
+      if (!order.whatsappConfirmation?.confirmedAt) {
+        (order as any).whatsappConfirmation = {
+          confirmedVia: 'whatsapp',
+          confirmedAt: new Date(),
+          whatsappPhone: phone,
+          whatsappMessageId: messageId,
+        };
+      }
+
+      await order.save();
+
+      this.logger.log(`[handleDepositScreenshot] Successfully saved deposit receipt for order ${order._id}: ${savedPath}`);
+
+      const orderRef = buildOrderRef(String((order as any)._id));
+      const customerName = order.firstName || 'عزيزي العميل';
+      await this.safeSend(phone, depositReceiptReceivedTemplate(orderRef, customerName));
+    } catch (err) {
+      this.logger.error(`[handleDepositScreenshot] Failed to download or save receipt for order ${order._id}:`, err);
+    }
+  }
+
+  /**
+   * Download receipt from remote WhatsApp URL and save to local uploads/receipts/
+   */
+  private async downloadAndSaveReceipt(imageUrl: string): Promise<string> {
+    if (!imageUrl.startsWith('http://') && !imageUrl.startsWith('https://')) {
+      return imageUrl;
+    }
+
+    const receiptsDir = join(process.cwd(), 'uploads', 'receipts');
+    if (!existsSync(receiptsDir)) {
+      mkdirSync(receiptsDir, { recursive: true });
+    }
+
+    const extMatch = imageUrl.split('?')[0].match(/\.(jpg|jpeg|png|webp|gif|pdf)$/i);
+    const ext = extMatch ? extMatch[1] : 'jpg';
+    const filename = `wa_receipt_${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
+    const filePath = join(receiptsDir, filename);
+
+    const res = await fetch(imageUrl, { signal: AbortSignal.timeout(20_000) });
+    if (!res.ok) {
+      throw new Error(`Failed to download receipt image: HTTP ${res.status}`);
+    }
+
+    const buffer = Buffer.from(await res.arrayBuffer());
+    writeFileSync(filePath, buffer);
+
+    return `/api/uploads/receipts/${filename}`;
+  }
+
   // ──────────────────────────────────────────────────────────────────────────
   // Helpers
   // ──────────────────────────────────────────────────────────────────────────
@@ -254,6 +382,7 @@ export class WhatsAppService {
     phone: string,
     status: OrderStatus,
     ref: string | null,
+    silent = false,
   ): Promise<typeOrder | null> {
     // Normalize phone variants to search against stored phone values
     // The DB may store local (01...) or E.164 (+20...)
@@ -265,8 +394,10 @@ export class WhatsAppService {
       .exec();
 
     if (orders.length === 0) {
-      this.logger.warn(`[findEligibleOrder] No ${status} order found for phone ${phone}`);
-      await this.safeSend(phone, noOrderFoundTemplate());
+      if (!silent) {
+        this.logger.warn(`[findEligibleOrder] No ${status} order found for phone ${phone}`);
+        await this.safeSend(phone, noOrderFoundTemplate());
+      }
       return null;
     }
 
@@ -275,8 +406,10 @@ export class WhatsAppService {
       const suffix = ref.replace('ORD-', '').toUpperCase();
       const matched = orders.find((o) => String((o as any)._id).toUpperCase().endsWith(suffix));
       if (!matched) {
-        this.logger.warn(`[findEligibleOrder] Ref ${ref} not found among ${orders.length} orders for ${phone}`);
-        await this.safeSend(phone, noOrderFoundTemplate());
+        if (!silent) {
+          this.logger.warn(`[findEligibleOrder] Ref ${ref} not found among ${orders.length} orders for ${phone}`);
+          await this.safeSend(phone, noOrderFoundTemplate());
+        }
         return null;
       }
       return matched;

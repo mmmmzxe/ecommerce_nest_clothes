@@ -224,10 +224,18 @@ export class WhatsAppService {
 
   private async processMessage(msg: any): Promise<void> {
     // Hashtag received chat shape: { id, account (sender), message, attachment, ... }
-    const rawPhone: string = msg?.account || msg?.phone || '';
-    const body: string = (msg?.message || '').trim();
-    const messageId: string = String(msg?.id || '');
+    // Log raw message keys to help diagnose field name issues
+    this.logger.debug(`[processMessage] raw msg keys: ${Object.keys(msg || {}).join(', ')} | raw: ${JSON.stringify(msg)?.slice(0, 300)}`);
+
+    const rawPhone: string = msg?.account || msg?.phone || msg?.from || msg?.sender || '';
+    const body: string = (msg?.message || msg?.text || msg?.body || '').trim();
+    const messageId: string = String(msg?.id || msg?.message_id || '');
+
+    // Hashtag API may send image URL under various field names — cover all known variants
     const attachmentUrl: string = (
+      msg?.imageUrl ||
+      msg?.image_url ||
+      msg?.mediaUrl ||
       msg?.attachment ||
       msg?.media_url ||
       msg?.media ||
@@ -447,13 +455,16 @@ export class WhatsAppService {
     }
 
     try {
-      const savedPath = await this.downloadAndSaveReceipt(imageUrl);
+      const receiptResult = await this.downloadAndSaveReceipt(imageUrl);
 
       order.depositReceipt = {
-        secure_url: savedPath,
-        public_id: savedPath,
+        secure_url: receiptResult.secure_url,
+        public_id: receiptResult.public_id,
       };
-      order.status = OrderStatus.pending_deposit;
+
+      // ✅ Advance status to 'placed' so the dashboard shows it as confirmed
+      order.status = OrderStatus.placed;
+
       (order as any).depositConfirmation = {
         depositConfirmed: true,
         confirmedVia: 'whatsapp',
@@ -476,22 +487,26 @@ export class WhatsAppService {
 
       await order.save();
 
-      this.logger.log(`[handleDepositScreenshot] Successfully saved deposit receipt for order ${order._id}: ${savedPath}`);
+      this.logger.log(`[handleDepositScreenshot] Saved deposit receipt for order ${order._id}: ${receiptResult.secure_url}`);
 
       const orderRef = buildOrderRef(String((order as any)._id));
       const customerName = `${order.firstName || ''} ${order.lastName || ''}`.trim() || 'عزيزي العميل';
       await this.safeSend(phone, depositReceiptReceivedTemplate(orderRef, customerName));
     } catch (err) {
-      this.logger.error(`[handleDepositScreenshot] Failed to download or save receipt for order ${order._id}:`, err);
+      this.logger.error(`[handleDepositScreenshot] Failed to process receipt for order ${order._id}:`, err);
     }
   }
 
   /**
-   * Download receipt from remote WhatsApp URL and save to local uploads/receipts/
+   * Download receipt from WhatsApp URL and save to local uploads/receipts/.
+   * Returns { secure_url, public_id } with /api/... prefix so it renders in the dashboard.
    */
-  private async downloadAndSaveReceipt(imageUrl: string): Promise<string> {
+  private async downloadAndSaveReceipt(
+    imageUrl: string,
+  ): Promise<{ secure_url: string; public_id: string }> {
     if (!imageUrl.startsWith('http://') && !imageUrl.startsWith('https://')) {
-      return imageUrl;
+      // Already a local/relative path — wrap it as-is
+      return { secure_url: imageUrl, public_id: imageUrl };
     }
 
     const receiptsDir = join(process.cwd(), 'uploads', 'receipts');
@@ -506,13 +521,14 @@ export class WhatsAppService {
 
     const res = await fetch(imageUrl, { signal: AbortSignal.timeout(20_000) });
     if (!res.ok) {
-      throw new Error(`Failed to download receipt image: HTTP ${res.status}`);
+      throw new Error(`Failed to download receipt image from WhatsApp: HTTP ${res.status}`);
     }
 
     const buffer = Buffer.from(await res.arrayBuffer());
     writeFileSync(filePath, buffer);
 
-    return `/api/uploads/receipts/${filename}`;
+    const publicPath = `/api/uploads/receipts/${filename}`;
+    return { secure_url: publicPath, public_id: publicPath };
   }
 
   // ──────────────────────────────────────────────────────────────────────────

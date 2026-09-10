@@ -30,6 +30,7 @@ export interface OrderMessageData {
 
 // InstaPay number for deposit transfers
 const INSTAPAY_PHONE = process.env.INSTAPAY_PHONE || '01128560748';
+const VODAFONE_PHONE = process.env.VODAFONE_PHONE || "01286198016"
 
 /**
  * Helper to build the comprehensive order breakdown block.
@@ -100,16 +101,16 @@ export function depositRequestTemplate(data: OrderMessageData): string {
     `━━━━━━━━━━━━━━━━━━━━━━`,
     ``,
     `💳 *لتأكيد الحجز وتجهيز الشحن، يرجى سداد العربون:*`,
-    ``,
-    `💰 *مبلغ العربون المطلوب:* *${depositAmount.toLocaleString('ar-EG')} EGP*`,
-    `💵 *المبلغ المتبقي عند الاستلام:* *${remaining.toLocaleString('ar-EG')} EGP*`,
-    ``,
-    `📱 *رقم InstaPay / فودافون كاش:*`,
+
+    `📱 *رقم InstaPay *`,
     `👉 *${INSTAPAY_PHONE}*`,
+    
+    `📱 *رقم Vodafone Cash *`,
+    `👉 *${VODAFONE_PHONE}*`,
     ``,
     `━━━━━━━━━━━━━━━━━━━━━━`,
     `📸 *بعد التحويل:*`,
-    `أرسل *صورة إيصال التحويل (Screenshot)* هنا مباشرةً وسيتم تأكيد طلبك تلقائياً في لوحة التحكم وتجهيزه للشحن! ✅`,
+    `أرسل *صورة إيصال التحويل (Screenshot)* هنا مباشرةً وسيتم تأكيد طلبك تلقائياً وتجهيزه للشحن! ✅`,
     ``,
     `شكراً لتسوقك معنا! 💜`,
   ].join('\n');

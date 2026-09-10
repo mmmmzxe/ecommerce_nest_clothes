@@ -1,6 +1,6 @@
 /**
- * WhatsApp message templates for the Extra Chic order flow.
- * Formats full customer, product (size, color, price), and address details.
+ * WhatsApp message templates for Extra Chic.
+ * Formats full customer, product (size, color, price), address, and deposit instructions.
  */
 
 export interface OrderItemData {
@@ -27,9 +27,6 @@ export interface OrderMessageData {
   totalEGP: number;
   depositAmountEGP?: number;
 }
-
-// Bot WhatsApp phone for wa.me links
-const BOT_PHONE = process.env.WHATSAPP_BOT_PHONE || '201286198016';
 
 // InstaPay number for deposit transfers
 const INSTAPAY_PHONE = process.env.INSTAPAY_PHONE || '01128560748';
@@ -87,46 +84,7 @@ function formatOrderBreakdown(data: OrderMessageData): string[] {
 }
 
 /**
- * Returns interactive buttons array for the confirmation template.
- */
-export function getConfirmationButtons(data: OrderMessageData): Array<{ id: string; text: string }> {
-  return [
-    { id: '1', text: '✅ تأكيد الطلب' },
-    { id: '2', text: '❌ إلغاء الطلب' },
-  ];
-}
-
-/**
  * Sent immediately after a new order is created.
- * Displays full customer info, products with size/color, and shipping address.
- */
-export function orderConfirmationRequestTemplate(data: OrderMessageData): string {
-  const confirmLink = `https://wa.me/${BOT_PHONE}?text=${encodeURIComponent(`تأكيد ${data.orderRef}`)}`;
-  const cancelLink = `https://wa.me/${BOT_PHONE}?text=${encodeURIComponent(`إلغاء ${data.orderRef}`)}`;
-
-  return [
-    `🛍️ مرحباً ${data.customerName}!`,
-    `تم استلام طلبك رقم *${data.orderRef}* بنجاح في متجر *Extra Chic*.`,
-    ``,
-    `━━━━━━━━━━━━━━━━━━━━━━`,
-    ...formatOrderBreakdown(data),
-    `━━━━━━━━━━━━━━━━━━━━━━`,
-    ``,
-    `اختر أحد الخيارات لتأكيد الطلب أو إلغائه:`,
-    ``,
-    `✅ *لتأكيد الطلب اضغط على الرابط التالي:*`,
-    confirmLink,
-    ``,
-    `❌ *لإلغاء الطلب اضغط على الرابط التالي:*`,
-    cancelLink,
-    ``,
-    `أو يمكنك الرد برقم: *1* للتأكيد أو *2* للإلغاء`,
-    `━━━━━━━━━━━━━━━━━━━━━━`,
-  ].join('\n');
-}
-
-/**
- * Sent after the customer confirms the order (or requests deposit details).
  * Displays full order details and prominent InstaPay payment instructions.
  */
 export function depositRequestTemplate(data: OrderMessageData): string {
@@ -134,7 +92,8 @@ export function depositRequestTemplate(data: OrderMessageData): string {
   const remaining = Math.max(0, data.totalEGP - depositAmount);
 
   return [
-    `✅ تم تأكيد استلام طلبك رقم *${data.orderRef}* بنجاح!`,
+    `🛍️ مرحباً ${data.customerName}!`,
+    `تم استلام طلبك رقم *${data.orderRef}* بنجاح في متجر *Extra Chic*.`,
     ``,
     `━━━━━━━━━━━━━━━━━━━━━━`,
     ...formatOrderBreakdown(data),
@@ -207,7 +166,7 @@ export function orderAlreadyCancelledTemplate(orderRef: string): string {
 }
 
 /**
- * Sent when customer tries to confirm an order that is already confirmed and active.
+ * Sent when customer tries to interact with an order that is already active/shipped.
  */
 export function orderAlreadyConfirmedTemplate(orderRef: string): string {
   return [
@@ -226,9 +185,7 @@ export function multipleOrdersTemplate(refs: string[]): string {
     `لديك أكثر من طلب قيد الانتظار:`,
     list,
     ``,
-    `اختر:`,
-    `1️⃣ أرسل *1* لتأكيد أحدث طلب`,
-    `2️⃣ أرسل *2* لإلغاء أحدث طلب`,
+    `أرسل صورة إيصال التحويل مع رقم الطلب لتأكيد الحجز.`,
   ].join('\n');
 }
 
@@ -246,8 +203,7 @@ export function unknownCommandTemplate(): string {
   return [
     `أهلاً بك في Extra Chic! 👋`,
     ``,
-    `لتأكيد طلبك: أرسل *1* أو *تأكيد*`,
-    `لإلغاء طلبك: أرسل *2* أو *إلغاء*`,
-    `لتأكيد دفع العربون: أرسل صورة إيصال التحويل (Screenshot) مباشرةً هنا.`,
+    `لتأكيد حجز طلبك: أرسل صورة إيصال تحويل العربون (Screenshot) مباشرةً هنا.`,
+    `لإلغاء طلبك: أرسل *إلغاء*`,
   ].join('\n');
 }

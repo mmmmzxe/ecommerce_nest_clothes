@@ -8,8 +8,6 @@ import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { WhatsAppClient } from './whatsapp.client';
 import {
-  orderConfirmationRequestTemplate,
-  getConfirmationButtons,
   depositRequestTemplate,
   depositConfirmedTemplate,
   depositReceiptReceivedTemplate,
@@ -163,7 +161,7 @@ export class WhatsAppService {
 
   /**
    * Called after a new order is successfully created.
-   * Sends interactive button message (with fallback to text + wa.me links).
+   * Sends the full order summary and deposit request (InstaPay details) directly.
    * Fire-and-forget: failures are logged but never re-thrown.
    */
   async sendOrderConfirmationMessage(order: typeOrder): Promise<void> {
@@ -176,17 +174,10 @@ export class WhatsAppService {
       }
 
       const data = await this.buildOrderMessageData(order);
-      const message = orderConfirmationRequestTemplate(data);
-      const buttons = getConfirmationButtons(data);
+      const message = depositRequestTemplate(data);
 
-      const result = await this.client.sendButtonMessage(
-        phone,
-        message,
-        buttons,
-        'Extra Chic Store',
-        1,
-      );
-      this.logger.log(`[sendOrderConfirmationMessage] Sent to ${phone}, ref=${data.orderRef}, result=${JSON.stringify(result?.status)}`);
+      const result = await this.client.sendTextMessage(phone, message, 1);
+      this.logger.log(`[sendOrderConfirmationMessage] Sent deposit request to ${phone}, ref=${data.orderRef}, result=${JSON.stringify(result?.status)}`);
     } catch (err) {
       this.logger.error(`[sendOrderConfirmationMessage] Failed for order ${order._id}:`, err?.message ?? err);
     }

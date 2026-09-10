@@ -2,6 +2,7 @@ import { Module, OnModuleInit } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Order, OrderModel } from 'src/DB/models/Order/order.model';
+import { Shipping, ShippingModel } from 'src/DB/models/Shipping/shipping.model';
 import { UserModel } from 'src/DB/models/User/user.model';
 import { UserRepository } from 'src/DB/models/User/user.repository';
 import { TokenService } from 'src/common/service/token.service';
@@ -12,6 +13,7 @@ import { registerWhatsAppListeners } from './whatsapp.event';
 @Module({
   imports: [
     OrderModel,
+    ShippingModel,
     UserModel,
   ],
   controllers: [WhatsAppController],

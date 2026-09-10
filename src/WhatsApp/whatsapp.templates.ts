@@ -1,16 +1,30 @@
 /**
- * WhatsApp message templates for the order flow.
- * All messages use text-only (Hashtag API does not support interactive buttons).
- * Numbered options simulate buttons: customer replies 1 or 2.
+ * WhatsApp message templates for the Extra Chic order flow.
+ * Formats full customer, product (size, color, price), and address details.
  */
+
+export interface OrderItemData {
+  name: string;
+  quantity: number;
+  unitPrice?: number;
+  finalPrice?: number;
+  color?: string;
+  size?: string;
+}
 
 export interface OrderMessageData {
   /** Short alphanumeric reference shown to the customer, e.g. ORD-A1B2C3 */
   orderRef: string;
   customerName: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  government?: string;
+  paymentMethod?: string;
+  items: OrderItemData[];
+  subTotalEGP?: number;
+  shippingFeeEGP?: number;
   totalEGP: number;
-  /** Array of product names + quantities for the summary line */
-  items: Array<{ name: string; quantity: number }>;
   depositAmountEGP?: number;
 }
 
@@ -20,8 +34,56 @@ const BOT_PHONE = process.env.WHATSAPP_BOT_PHONE || '201286198016';
 // InstaPay number for deposit transfers
 const INSTAPAY_PHONE = process.env.INSTAPAY_PHONE || '01128560748';
 
-function itemsLine(items: Array<{ name: string; quantity: number }>): string {
-  return items.map((i) => `  • ${i.name} × ${i.quantity}`).join('\n');
+/**
+ * Helper to build the comprehensive order breakdown block.
+ */
+function formatOrderBreakdown(data: OrderMessageData): string[] {
+  const lines: string[] = [];
+
+  // 1. Customer Information
+  lines.push(`👤 *بيانات العميل (Customer Information):*`);
+  lines.push(`• *الاسم (Name):* ${data.customerName}`);
+  if (data.phone) lines.push(`• *الهاتف (Phone):* ${data.phone}`);
+  if (data.email) lines.push(`• *البريد (Email):* ${data.email}`);
+
+  // 2. Shipping Address
+  if (data.address || data.government) {
+    lines.push(``);
+    lines.push(`📍 *عنوان التوصيل (Shipping Address):*`);
+    if (data.address) lines.push(`• *العنوان:* ${data.address}`);
+    if (data.government) lines.push(`• *المحافظة (Government):* ${data.government}`);
+  }
+
+  // 3. Payment Information
+  lines.push(``);
+  lines.push(`💳 *معلومات الدفع (Payment Information):*`);
+  const methodText = data.paymentMethod === 'card' ? 'بطاقة بنكية (Card)' : 'الدفع عند الاستلام (Cash)';
+  lines.push(`• *طريقة الدفع (Method):* ${methodText}`);
+
+  // 4. Order Items (including Size, Color, Quantity, Unit price)
+  lines.push(``);
+  lines.push(`📦 *المنتجات المطلوبة (Order Items):*`);
+  data.items.forEach((item, idx) => {
+    lines.push(`*${idx + 1}. ${item.name}*`);
+    lines.push(`   - *الكمية (Quantity):* ${item.quantity}`);
+    if (item.unitPrice) lines.push(`   - *سعر القطعة (Unit):* ${item.unitPrice.toLocaleString('ar-EG')} EGP`);
+    if (item.color) lines.push(`   - *اللون (Color):* ${item.color}`);
+    if (item.size) lines.push(`   - *المقاس (Size):* ${item.size}`);
+    if (item.finalPrice) lines.push(`   - *الإجمالي للقطعة:* ${item.finalPrice.toLocaleString('ar-EG')} EGP`);
+  });
+
+  // 5. Order Summary
+  lines.push(``);
+  lines.push(`💰 *ملخص الحساب (Order Summary):*`);
+  if (data.subTotalEGP !== undefined) {
+    lines.push(`• *المجموع الفرعي (Subtotal):* ${data.subTotalEGP.toLocaleString('ar-EG')} EGP`);
+  }
+  if (data.shippingFeeEGP !== undefined) {
+    lines.push(`• *مصاريف الشحن (Shipping):* ${data.shippingFeeEGP.toLocaleString('ar-EG')} EGP`);
+  }
+  lines.push(`• *الإجمالي الكلي (Total):* *${data.totalEGP.toLocaleString('ar-EG')} EGP*`);
+
+  return lines;
 }
 
 /**
@@ -36,7 +98,7 @@ export function getConfirmationButtons(data: OrderMessageData): Array<{ id: stri
 
 /**
  * Sent immediately after a new order is created.
- * Supports interactive buttons and includes clickable wa.me direct links in text.
+ * Displays full customer info, products with size/color, and shipping address.
  */
 export function orderConfirmationRequestTemplate(data: OrderMessageData): string {
   const confirmLink = `https://wa.me/${BOT_PHONE}?text=${encodeURIComponent(`تأكيد ${data.orderRef}`)}`;
@@ -44,22 +106,18 @@ export function orderConfirmationRequestTemplate(data: OrderMessageData): string
 
   return [
     `🛍️ مرحباً ${data.customerName}!`,
-    ``,
-    `تم استلام طلبك بنجاح.`,
-    `رقم الطلب: *${data.orderRef}*`,
-    ``,
-    `📦 المنتجات:`,
-    itemsLine(data.items),
-    ``,
-    `💰 الإجمالي: *${data.totalEGP.toLocaleString('ar-EG')} EGP*`,
+    `تم استلام طلبك رقم *${data.orderRef}* بنجاح في متجر *Extra Chic*.`,
     ``,
     `━━━━━━━━━━━━━━━━━━━━━━`,
-    `لتأكيد طلبك أو إلغائه، اختر أحد الخيارات:`,
+    ...formatOrderBreakdown(data),
+    `━━━━━━━━━━━━━━━━━━━━━━`,
     ``,
-    `✅ *تأكيد الطلب اضغط هنا:*`,
+    `اختر أحد الخيارات لتأكيد الطلب أو إلغائه:`,
+    ``,
+    `✅ *لتأكيد الطلب اضغط على الرابط التالي:*`,
     confirmLink,
     ``,
-    `❌ *إلغاء الطلب اضغط هنا:*`,
+    `❌ *لإلغاء الطلب اضغط على الرابط التالي:*`,
     cancelLink,
     ``,
     `أو يمكنك الرد برقم: *1* للتأكيد أو *2* للإلغاء`,
@@ -68,28 +126,33 @@ export function orderConfirmationRequestTemplate(data: OrderMessageData): string
 }
 
 /**
- * Sent after the customer confirms the order.
- * Shows InstaPay phone prominently and instructs to send receipt screenshot.
+ * Sent after the customer confirms the order (or requests deposit details).
+ * Displays full order details and prominent InstaPay payment instructions.
  */
 export function depositRequestTemplate(data: OrderMessageData): string {
   const depositAmount = data.depositAmountEGP && data.depositAmountEGP > 0 ? data.depositAmountEGP : 50;
+  const remaining = Math.max(0, data.totalEGP - depositAmount);
 
   return [
-    `✅ تم تأكيد طلبك رقم *${data.orderRef}* بنجاح!`,
+    `✅ تم تأكيد استلام طلبك رقم *${data.orderRef}* بنجاح!`,
     ``,
     `━━━━━━━━━━━━━━━━━━━━━━`,
-    `💳 لتأكيد الحجز، يرجى سداد العربون:`,
+    ...formatOrderBreakdown(data),
+    `━━━━━━━━━━━━━━━━━━━━━━`,
     ``,
-    `💰 المبلغ: *${depositAmount.toLocaleString('ar-EG')} EGP*`,
+    `💳 *لتأكيد الحجز وتجهيز الشحن، يرجى سداد العربون:*`,
+    ``,
+    `💰 *مبلغ العربون المطلوب:* *${depositAmount.toLocaleString('ar-EG')} EGP*`,
+    `💵 *المبلغ المتبقي عند الاستلام:* *${remaining.toLocaleString('ar-EG')} EGP*`,
     ``,
     `📱 *رقم InstaPay / فودافون كاش:*`,
     `👉 *${INSTAPAY_PHONE}*`,
+    ``,
     `━━━━━━━━━━━━━━━━━━━━━━`,
-    ``,
     `📸 *بعد التحويل:*`,
-    `أرسل *صورة إيصال التحويل* هنا مباشرةً وسيتم تأكيد الطلب تلقائياً ✅`,
+    `أرسل *صورة إيصال التحويل (Screenshot)* هنا مباشرةً وسيتم تأكيد طلبك تلقائياً في لوحة التحكم وتجهيزه للشحن! ✅`,
     ``,
-    `شكراً لك! 💜`,
+    `شكراً لتسوقك معنا! 💜`,
   ].join('\n');
 }
 
@@ -101,9 +164,9 @@ export function depositReceiptReceivedTemplate(orderRef: string, customerName: s
     `🎉 شكراً ${customerName}!`,
     ``,
     `تم استلام صورة إيصال العربون لطلبك رقم *${orderRef}* بنجاح! ✅`,
-    `تم إرفاق الإيصال في النظام وتأكيد الحجز، وجاري تجهيز طلبك بعناية. 🌸`,
+    `تم إرفاق الإيصال في النظام وتأكيد الحجز في لوحة التحكم، وجاري تجهيز طلبك بعناية فائقة. 🌸`,
     ``,
-    `سنقوم بإشعارك فور شحن الطلب إليك. نشكرك على ثقتك بنا! 💜`,
+    `سنقوم بإشعارك فور شحن الطلب إليك مع مندوب التوصيل. نشكرك على ثقتك بنا! 💜`,
   ].join('\n');
 }
 
@@ -133,21 +196,6 @@ export function orderCancelledTemplate(orderRef: string, customerName: string): 
 }
 
 /**
- * Sent when the phone matches multiple pending orders.
- */
-export function multipleOrdersTemplate(refs: string[]): string {
-  const list = refs.map((r) => `  • ${r}`).join('\n');
-  return [
-    `لديك أكثر من طلب قيد الانتظار:`,
-    list,
-    ``,
-    `اختر:`,
-    `1️⃣ أرسل *1* لتأكيد أحدث طلب`,
-    `2️⃣ أرسل *2* لإلغاء أحدث طلب`,
-  ].join('\n');
-}
-
-/**
  * Sent when customer tries to take action on an already cancelled order.
  */
 export function orderAlreadyCancelledTemplate(orderRef: string): string {
@@ -170,6 +218,21 @@ export function orderAlreadyConfirmedTemplate(orderRef: string): string {
 }
 
 /**
+ * Sent when the phone matches multiple pending orders.
+ */
+export function multipleOrdersTemplate(refs: string[]): string {
+  const list = refs.map((r) => `  • ${r}`).join('\n');
+  return [
+    `لديك أكثر من طلب قيد الانتظار:`,
+    list,
+    ``,
+    `اختر:`,
+    `1️⃣ أرسل *1* لتأكيد أحدث طلب`,
+    `2️⃣ أرسل *2* لإلغاء أحدث طلب`,
+  ].join('\n');
+}
+
+/**
  * Sent when no eligible order is found for the phone number.
  */
 export function noOrderFoundTemplate(): string {
@@ -181,10 +244,10 @@ export function noOrderFoundTemplate(): string {
  */
 export function unknownCommandTemplate(): string {
   return [
-    `أهلاً بك! 👋`,
+    `أهلاً بك في Extra Chic! 👋`,
     ``,
     `لتأكيد طلبك: أرسل *1* أو *تأكيد*`,
     `لإلغاء طلبك: أرسل *2* أو *إلغاء*`,
-    `لتأكيد الدفع: أرسل صورة إيصال التحويل مباشرةً هنا.`,
+    `لتأكيد دفع العربون: أرسل صورة إيصال التحويل (Screenshot) مباشرةً هنا.`,
   ].join('\n');
 }

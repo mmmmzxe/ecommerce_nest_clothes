@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { Order } from 'src/DB/models/Order/order.model';
-import { typeOrder } from 'src/DB/models/Order/order.model';
+import { Order, typeOrder } from 'src/DB/models/Order/order.model';
+import { Shipping, typeShipping } from 'src/DB/models/Shipping/shipping.model';
 import { OrderStatus } from 'src/User/Order/order.interface';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
@@ -20,6 +20,7 @@ import {
   noOrderFoundTemplate,
   unknownCommandTemplate,
   OrderMessageData,
+  OrderItemData,
 } from './whatsapp.templates';
 
 // ─── Phone Normalization ──────────────────────────────────────────────────────
@@ -96,7 +97,65 @@ export class WhatsAppService {
 
   constructor(
     @InjectModel(Order.name) private readonly orderModel: Model<typeOrder>,
+    @InjectModel(Shipping.name) private readonly shippingModel: Model<typeShipping>,
   ) {}
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Helper: Build Full OrderMessageData
+  // ──────────────────────────────────────────────────────────────────────────
+
+  async buildOrderMessageData(order: typeOrder): Promise<OrderMessageData> {
+    const orderRef = buildOrderRef(String((order as any)._id));
+
+    // Fetch shipping info
+    let government = '';
+    let shippingPrice = 0;
+    if (order.shippingId) {
+      if (typeof order.shippingId === 'object' && (order.shippingId as any).government) {
+        government = (order.shippingId as any).government;
+        shippingPrice = Number((order.shippingId as any).price || 0);
+      } else {
+        try {
+          const shipDoc = await this.shippingModel.findById(order.shippingId).exec();
+          if (shipDoc) {
+            government = shipDoc.government;
+            shippingPrice = Number(shipDoc.price || 0);
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+    }
+
+    const items: OrderItemData[] = (order.products || []).map((p: any) => ({
+      name: p.name || 'Product',
+      quantity: Number(p.quantity || 1),
+      unitPrice: Number(p.unitPrice || 0),
+      finalPrice: Number(p.finalPrice || ((p.unitPrice || 0) * (p.quantity || 1)) || 0),
+      color: p.variant?.color || undefined,
+      size: p.variant?.size || undefined,
+    }));
+
+    const customerName = `${order.firstName || ''} ${order.lastName || ''}`.trim() || 'عزيزي العميل';
+    const subTotal = Number(order.subTotal || (order.finalPrice - shippingPrice));
+    const total = Number(order.finalPrice || 0);
+    const depositAmount = Number(order.deposit && order.deposit > 0 ? order.deposit : 50);
+
+    return {
+      orderRef,
+      customerName,
+      email: order.email || undefined,
+      phone: order.phone,
+      address: order.address,
+      government: government || undefined,
+      paymentMethod: order.paymentWay,
+      items,
+      subTotalEGP: subTotal > 0 ? subTotal : undefined,
+      shippingFeeEGP: shippingPrice > 0 ? shippingPrice : (total - subTotal > 0 ? total - subTotal : undefined),
+      totalEGP: total,
+      depositAmountEGP: depositAmount,
+    };
+  }
 
   // ──────────────────────────────────────────────────────────────────────────
   // OUTBOUND
@@ -116,16 +175,7 @@ export class WhatsAppService {
         return;
       }
 
-      const orderRef = buildOrderRef(String((order as any)._id));
-      const items = (order.products || []).map((p) => ({ name: p.name, quantity: p.quantity }));
-      const data: OrderMessageData = {
-        orderRef,
-        customerName: order.firstName || 'عزيزي العميل',
-        totalEGP: order.finalPrice,
-        items,
-        depositAmountEGP: order.deposit ?? 0,
-      };
-
+      const data = await this.buildOrderMessageData(order);
       const message = orderConfirmationRequestTemplate(data);
       const buttons = getConfirmationButtons(data);
 
@@ -136,7 +186,7 @@ export class WhatsAppService {
         'Extra Chic Store',
         1,
       );
-      this.logger.log(`[sendOrderConfirmationMessage] Sent to ${phone}, ref=${orderRef}, result=${JSON.stringify(result?.status)}`);
+      this.logger.log(`[sendOrderConfirmationMessage] Sent to ${phone}, ref=${data.orderRef}, result=${JSON.stringify(result?.status)}`);
     } catch (err) {
       this.logger.error(`[sendOrderConfirmationMessage] Failed for order ${order._id}:`, err?.message ?? err);
     }
@@ -273,7 +323,7 @@ export class WhatsAppService {
 
   /**
    * Handle "CONFIRM [ref]" / "تأكيد [ref]" / "1" message.
-   * If already pending_deposit, re-sends deposit instructions.
+   * If already pending_deposit, re-sends deposit instructions with full order details.
    */
   async handleOrderConfirm(phone: string, ref: string | null, messageId: string): Promise<void> {
     const order = await this.findEligibleOrder(
@@ -283,18 +333,11 @@ export class WhatsAppService {
     );
     if (!order) return;
 
+    const data = await this.buildOrderMessageData(order);
+
     // If order was already confirmed and awaiting deposit, re-send deposit instructions
     if (order.status === OrderStatus.pending_deposit || order.whatsappConfirmation?.confirmedAt) {
       this.logger.log(`[handleOrderConfirm] Order ${order._id} already confirmed/pending_deposit, re-sending deposit request.`);
-      const orderRef = buildOrderRef(String((order as any)._id));
-      const items = (order.products || []).map((p) => ({ name: p.name, quantity: p.quantity }));
-      const data: OrderMessageData = {
-        orderRef,
-        customerName: order.firstName || 'عزيزي العميل',
-        totalEGP: order.finalPrice,
-        items,
-        depositAmountEGP: order.deposit ?? 0,
-      };
       await this.safeSend(phone, depositRequestTemplate(data));
       return;
     }
@@ -311,16 +354,7 @@ export class WhatsAppService {
 
     this.logger.log(`[handleOrderConfirm] Order ${order._id} confirmed via WhatsApp by ${phone}`);
 
-    // Send deposit request
-    const orderRef = buildOrderRef(String((order as any)._id));
-    const items = (order.products || []).map((p) => ({ name: p.name, quantity: p.quantity }));
-    const data: OrderMessageData = {
-      orderRef,
-      customerName: order.firstName || 'عزيزي العميل',
-      totalEGP: order.finalPrice,
-      items,
-      depositAmountEGP: order.deposit ?? 0,
-    };
+    // Send deposit request with full customer details & items breakdown
     await this.safeSend(phone, depositRequestTemplate(data));
   }
 
@@ -360,7 +394,7 @@ export class WhatsAppService {
     this.logger.log(`[handleOrderCancel] Order ${order._id} cancelled via WhatsApp by ${phone}`);
 
     const orderRef = buildOrderRef(String((order as any)._id));
-    const customerName = order.firstName || 'عزيزي العميل';
+    const customerName = `${order.firstName || ''} ${order.lastName || ''}`.trim() || 'عزيزي العميل';
     await this.safeSend(phone, orderCancelledTemplate(orderRef, customerName));
   }
 
@@ -393,7 +427,7 @@ export class WhatsAppService {
     this.logger.log(`[handleDepositConfirm] Deposit confirmed for order ${order._id} via WhatsApp by ${phone}`);
 
     const orderRef = buildOrderRef(String((order as any)._id));
-    const customerName = order.firstName || 'عزيزي العميل';
+    const customerName = `${order.firstName || ''} ${order.lastName || ''}`.trim() || 'عزيزي العميل';
     await this.safeSend(phone, depositConfirmedTemplate(orderRef, customerName));
   }
 
@@ -435,6 +469,9 @@ export class WhatsAppService {
         confirmedAt: new Date(),
         whatsappMessageId: messageId,
       };
+      if (!order.deposit || order.deposit === 0) {
+        order.deposit = 50;
+      }
 
       // Also ensure whatsappConfirmation is marked if not already
       if (!order.whatsappConfirmation?.confirmedAt) {
@@ -451,7 +488,7 @@ export class WhatsAppService {
       this.logger.log(`[handleDepositScreenshot] Successfully saved deposit receipt for order ${order._id}: ${savedPath}`);
 
       const orderRef = buildOrderRef(String((order as any)._id));
-      const customerName = order.firstName || 'عزيزي العميل';
+      const customerName = `${order.firstName || ''} ${order.lastName || ''}`.trim() || 'عزيزي العميل';
       await this.safeSend(phone, depositReceiptReceivedTemplate(orderRef, customerName));
     } catch (err) {
       this.logger.error(`[handleDepositScreenshot] Failed to download or save receipt for order ${order._id}:`, err);

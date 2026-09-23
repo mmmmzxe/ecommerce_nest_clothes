@@ -2,34 +2,75 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Body,
   Query,
   HttpCode,
   HttpStatus,
   Logger,
   ForbiddenException,
+  UseGuards,
 } from '@nestjs/common';
 import { Public } from 'src/common/Decorator/public.decorator';
+import { Role } from 'src/common/Decorator/role.decorator';
+import { AuthGuard } from 'src/common/Guards/auth.guard';
+import { RoleGuard } from 'src/common/Guards/role.guard';
 import { WhatsAppService } from './whatsapp.service';
+import { SendTestWhatsAppMessageDto, UpdateWhatsAppSettingsDto } from './dto/update-whatsapp-settings.dto';
 
 /**
- * Webhook endpoint for the Hashtag WhatsApp Bot.
- *
- * Security: The Hashtag API does not provide HMAC signatures on webhooks.
- * We validate a shared secret token passed as a query parameter.
- *
- * Configure the webhook URL in the Hashtag dashboard as:
- *   https://YOUR_DOMAIN/api/whatsapp/webhook?secret=<WHATSAPP_WEBHOOK_SECRET>
- *
- * Keep WHATSAPP_WEBHOOK_SECRET strong and secret (min 32 random characters).
- *
- * Processing is always idempotent — receiving the same webhook twice is a no-op.
+ * Webhook endpoint for the Hashtag WhatsApp Bot & Admin Management APIs.
  */
 @Controller('whatsapp')
 export class WhatsAppController {
   private readonly logger = new Logger(WhatsAppController.name);
 
   constructor(private readonly whatsappService: WhatsAppService) {}
+
+  /**
+   * GET /api/whatsapp/settings
+   * Admin endpoint to fetch current WhatsApp settings.
+   */
+  @UseGuards(AuthGuard, RoleGuard)
+  @Role(['superAdmin', 'admin'])
+  @Get('settings')
+  async getSettings() {
+    const settings = await this.whatsappService.getSettings();
+    return {
+      message: 'WhatsApp settings fetched successfully',
+      data: settings,
+    };
+  }
+
+  /**
+   * PUT /api/whatsapp/settings
+   * Admin endpoint to update WhatsApp settings.
+   */
+  @UseGuards(AuthGuard, RoleGuard)
+  @Role(['superAdmin', 'admin'])
+  @Put('settings')
+  async updateSettings(@Body() dto: UpdateWhatsAppSettingsDto) {
+    const updated = await this.whatsappService.updateSettings(dto);
+    return {
+      message: 'WhatsApp settings updated successfully',
+      data: updated,
+    };
+  }
+
+  /**
+   * POST /api/whatsapp/test
+   * Admin endpoint to send a test WhatsApp message.
+   */
+  @UseGuards(AuthGuard, RoleGuard)
+  @Role(['superAdmin', 'admin'])
+  @Post('test')
+  async sendTestMessage(@Body() dto: SendTestWhatsAppMessageDto) {
+    const result = await this.whatsappService.sendTestMessage(dto.recipient, dto.message);
+    return {
+      message: 'Test WhatsApp message sent successfully',
+      data: result,
+    };
+  }
 
   /**
    * POST /api/whatsapp/webhook?secret=TOKEN
@@ -84,3 +125,4 @@ export class WhatsAppController {
     return query['hub.challenge'] || 'OK';
   }
 }
+

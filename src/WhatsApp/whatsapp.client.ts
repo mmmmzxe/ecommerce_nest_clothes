@@ -1,20 +1,39 @@
+export interface WhatsAppClientOptions {
+  baseURL?: string;
+  secret?: string;
+  accountUniqueId?: string;
+}
+
 /**
  * HTTP client for the Hashtag WhatsApp Bot API using native fetch.
- * All credentials are read from environment variables — never hardcoded.
+ * Credentials can be provided in constructor, set dynamically, or read from environment variables.
  */
 export class WhatsAppClient {
-  private readonly baseURL: string;
-  private readonly secret: string;
-  private readonly accountUniqueId: string;
+  private baseURL: string;
+  private secret: string;
+  private accountUniqueId: string;
 
-  constructor() {
-    this.baseURL = process.env.WHATSAPP_API_BASE_URL || 'https://hashtagmarketing.agency/api';
-    this.secret = process.env.WHATSAPP_API_SECRET || '';
-    this.accountUniqueId = process.env.WHATSAPP_ACCOUNT_UNIQUE_ID || '';
+  constructor(options?: WhatsAppClientOptions) {
+    this.baseURL = options?.baseURL || process.env.WHATSAPP_API_BASE_URL || 'https://hashtagmarketing.agency/api';
+    this.secret = options?.secret || process.env.WHATSAPP_API_SECRET || '';
+    this.accountUniqueId = options?.accountUniqueId || process.env.WHATSAPP_ACCOUNT_UNIQUE_ID || '';
+  }
 
-    if (!this.secret || !this.accountUniqueId) {
-      console.warn('[WhatsApp] WHATSAPP_API_SECRET or WHATSAPP_ACCOUNT_UNIQUE_ID is not set.');
-    }
+  /**
+   * Update client credentials dynamically at runtime.
+   */
+  setCredentials(options: WhatsAppClientOptions): void {
+    if (options.baseURL !== undefined) this.baseURL = options.baseURL;
+    if (options.secret !== undefined) this.secret = options.secret;
+    if (options.accountUniqueId !== undefined) this.accountUniqueId = options.accountUniqueId;
+  }
+
+  getCredentials(): WhatsAppClientOptions {
+    return {
+      baseURL: this.baseURL,
+      secret: this.secret,
+      accountUniqueId: this.accountUniqueId,
+    };
   }
 
   /**
@@ -26,16 +45,24 @@ export class WhatsAppClient {
    * @param priority   1 = send immediately, 2 = queued (default)
    * @returns          The Hashtag API response data
    */
-  async sendTextMessage(recipient: string, message: string, priority: 1 | 2 = 1): Promise<any> {
+  async sendTextMessage(recipient: string, message: string, priority: 1 | 2 = 1, optionsOverride?: WhatsAppClientOptions): Promise<any> {
+    const secret = optionsOverride?.secret || this.secret;
+    const accountUniqueId = optionsOverride?.accountUniqueId || this.accountUniqueId;
+    const baseURL = optionsOverride?.baseURL || this.baseURL;
+
+    if (!secret || !accountUniqueId) {
+      throw new Error('WhatsApp API secret or Account Unique ID is missing.');
+    }
+
     const form = new URLSearchParams();
-    form.append('secret', this.secret);
-    form.append('account', this.accountUniqueId);
+    form.append('secret', secret);
+    form.append('account', accountUniqueId);
     form.append('recipient', recipient);
     form.append('type', 'text');
     form.append('message', message);
     form.append('priority', String(priority));
 
-    const response = await fetch(`${this.baseURL}/send/whatsapp`, {
+    const response = await fetch(`${baseURL}/send/whatsapp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: form.toString(),
@@ -60,11 +87,20 @@ export class WhatsAppClient {
     buttons: Array<{ id: string; text: string }>,
     footer?: string,
     priority: 1 | 2 = 1,
+    optionsOverride?: WhatsAppClientOptions,
   ): Promise<any> {
+    const secret = optionsOverride?.secret || this.secret;
+    const accountUniqueId = optionsOverride?.accountUniqueId || this.accountUniqueId;
+    const baseURL = optionsOverride?.baseURL || this.baseURL;
+
     try {
+      if (!secret || !accountUniqueId) {
+        throw new Error('WhatsApp API secret or Account Unique ID is missing.');
+      }
+
       const form = new URLSearchParams();
-      form.append('secret', this.secret);
-      form.append('account', this.accountUniqueId);
+      form.append('secret', secret);
+      form.append('account', accountUniqueId);
       form.append('recipient', recipient);
       form.append('type', 'button');
       form.append('message', message);
@@ -80,7 +116,7 @@ export class WhatsAppClient {
       );
       form.append('priority', String(priority));
 
-      const response = await fetch(`${this.baseURL}/send/whatsapp`, {
+      const response = await fetch(`${baseURL}/send/whatsapp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: form.toString(),
@@ -90,22 +126,25 @@ export class WhatsAppClient {
       if (!response.ok) {
         const errorText = await response.text().catch(() => '');
         console.warn(`[WhatsAppClient] Button message failed (${response.status}: ${errorText}), falling back to text`);
-        return this.sendTextMessage(recipient, message, priority);
+        return this.sendTextMessage(recipient, message, priority, optionsOverride);
       }
 
       return response.json();
     } catch (err) {
       console.warn(`[WhatsAppClient] sendButtonMessage exception, falling back to text:`, err?.message ?? err);
-      return this.sendTextMessage(recipient, message, priority);
+      return this.sendTextMessage(recipient, message, priority, optionsOverride);
     }
   }
 
   /**
    * Retrieve a list of WhatsApp accounts linked to this API key.
    */
-  async getAccounts(): Promise<any> {
-    const url = new URL(`${this.baseURL}/get/wa.accounts`);
-    url.searchParams.append('secret', this.secret);
+  async getAccounts(optionsOverride?: WhatsAppClientOptions): Promise<any> {
+    const secret = optionsOverride?.secret || this.secret;
+    const baseURL = optionsOverride?.baseURL || this.baseURL;
+
+    const url = new URL(`${baseURL}/get/wa.accounts`);
+    url.searchParams.append('secret', secret);
 
     const response = await fetch(url.toString(), {
       method: 'GET',
@@ -120,4 +159,3 @@ export class WhatsAppClient {
     return response.json();
   }
 }
-

@@ -21,6 +21,8 @@ import {
   OrderItemData,
 } from './whatsapp.templates';
 
+import { WhatsAppSettings, typeWhatsAppSettings } from 'src/DB/models/WhatsApp/whatsapp-settings.model';
+
 // ─── Phone Normalization ──────────────────────────────────────────────────────
 
 /**
@@ -96,7 +98,77 @@ export class WhatsAppService {
   constructor(
     @InjectModel(Order.name) private readonly orderModel: Model<typeOrder>,
     @InjectModel(Shipping.name) private readonly shippingModel: Model<typeShipping>,
+    @InjectModel(WhatsAppSettings.name) private readonly whatsappSettingsModel: Model<typeWhatsAppSettings>,
   ) {}
+
+  /**
+   * Get active WhatsApp settings or initialize from .env if not found.
+   */
+  async getSettings(): Promise<WhatsAppSettings> {
+    let settings = await this.whatsappSettingsModel.findOne().exec();
+    if (!settings) {
+      settings = await this.whatsappSettingsModel.create({
+        accountUniqueId: process.env.WHATSAPP_ACCOUNT_UNIQUE_ID || '17900733771679091c5a880faf6fb5e6087eb1b2dc6ab25a21edaf1',
+        apiSecret: process.env.WHATSAPP_API_SECRET || '',
+        apiBaseUrl: process.env.WHATSAPP_API_BASE_URL || 'https://hashtagmarketing.agency/api',
+        webhookSecret: process.env.WHATSAPP_WEBHOOK_SECRET || process.env.WHATSAPP_API_SECRET || '',
+        botPhone: process.env.WHATSAPP_BOT_PHONE || '201286198016',
+        instapayPhone: process.env.INSTAPAY_PHONE || '01128560748',
+        vodafonePhone: process.env.VODAFONE_PHONE || '01286198016',
+        isEnabled: true,
+        autoSendOrderConfirmation: true,
+      });
+    }
+
+    // Sync client credentials
+    this.client.setCredentials({
+      accountUniqueId: settings.accountUniqueId || process.env.WHATSAPP_ACCOUNT_UNIQUE_ID,
+      secret: settings.apiSecret || process.env.WHATSAPP_API_SECRET,
+      baseURL: settings.apiBaseUrl || process.env.WHATSAPP_API_BASE_URL,
+    });
+
+    return settings;
+  }
+
+  /**
+   * Update WhatsApp settings in DB and sync active client.
+   */
+  async updateSettings(dto: Partial<WhatsAppSettings>): Promise<WhatsAppSettings> {
+    let settings = await this.whatsappSettingsModel.findOne().exec();
+    if (!settings) {
+      settings = new this.whatsappSettingsModel(dto);
+    } else {
+      Object.assign(settings, dto);
+    }
+    await settings.save();
+
+    // Sync client credentials
+    this.client.setCredentials({
+      accountUniqueId: settings.accountUniqueId || process.env.WHATSAPP_ACCOUNT_UNIQUE_ID,
+      secret: settings.apiSecret || process.env.WHATSAPP_API_SECRET,
+      baseURL: settings.apiBaseUrl || process.env.WHATSAPP_API_BASE_URL,
+    });
+
+    return settings;
+  }
+
+  /**
+   * Send a test WhatsApp message to verify settings.
+   */
+  async sendTestMessage(recipientRaw: string, customMessage?: string): Promise<any> {
+    const settings = await this.getSettings();
+    const recipient = normalizeEgyptianPhone(recipientRaw);
+    if (!recipient) {
+      throw new Error(`Invalid recipient phone number format: ${recipientRaw}`);
+    }
+
+    const message = customMessage || `👋 Extra Chic WhatsApp Bot Test\n\nUnique ID: ${settings.accountUniqueId}\nStatus: Active & Verified ✅`;
+    return this.client.sendTextMessage(recipient, message, 1, {
+      accountUniqueId: settings.accountUniqueId || process.env.WHATSAPP_ACCOUNT_UNIQUE_ID,
+      secret: settings.apiSecret || process.env.WHATSAPP_API_SECRET,
+      baseURL: settings.apiBaseUrl || process.env.WHATSAPP_API_BASE_URL,
+    });
+  }
 
   // ──────────────────────────────────────────────────────────────────────────
   // Helper: Build Full OrderMessageData

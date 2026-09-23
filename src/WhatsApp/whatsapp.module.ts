@@ -6,6 +6,7 @@ import { Shipping, ShippingModel } from 'src/DB/models/Shipping/shipping.model';
 import { UserModel } from 'src/DB/models/User/user.model';
 import { UserRepository } from 'src/DB/models/User/user.repository';
 import { TokenService } from 'src/common/service/token.service';
+import { WhatsAppSettingsModel } from 'src/DB/models/WhatsApp/whatsapp-settings.model';
 import { WhatsAppController } from './whatsapp.controller';
 import { WhatsAppService } from './whatsapp.service';
 import { registerWhatsAppListeners } from './whatsapp.event';
@@ -15,6 +16,7 @@ import { registerWhatsAppListeners } from './whatsapp.event';
     OrderModel,
     ShippingModel,
     UserModel,
+    WhatsAppSettingsModel,
   ],
   controllers: [WhatsAppController],
   providers: [

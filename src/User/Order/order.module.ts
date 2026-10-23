@@ -15,9 +15,10 @@ import { PaymobModule } from "src/Payment/paymob.module";
 import { ShippingRepository } from "src/DB/models/Shipping/shipping.repository";
 import { ShippingModel } from "src/DB/models/Shipping/shipping.model";
 import { CloudService } from "src/common/service/cloud.service";
+import { FlextockModule } from "src/Flextock/flextock.module";
 
 @Module({
-    imports:[CartModel, ProductModel, OrderModel, UserModel, PaymobModule, ShippingModel],
+    imports:[CartModel, ProductModel, OrderModel, UserModel, PaymobModule, ShippingModel, FlextockModule],
     controllers:[OrderController],
     providers:[
         OrderService,

@@ -14,6 +14,7 @@ import { ShippingModule } from './Shipping/shipping.module';
 import { AnnouncementModule } from './Announcement/announcement.module';
 import { SocialOrderModule } from './SocialOrder/social-order.module';
 import { WhatsAppModule } from './WhatsApp/whatsapp.module';
+import { FlextockModule } from './Flextock/flextock.module';
 import { CacheModule } from '@nestjs/cache-manager';
 import { createKeyv } from '@keyv/redis';
 import { AppController } from './app.controller';
@@ -50,6 +51,7 @@ if (!databaseUrl) {
     AnnouncementModule,
     SocialOrderModule,
     WhatsAppModule,
+    FlextockModule,
   ],
   providers: [],
 })

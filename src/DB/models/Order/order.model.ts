@@ -105,6 +105,27 @@ export class Order {
     }))
     depositConfirmation?: IDepositConfirmation;
 
+    // ─── Flextock Integration ──────────────────────────────────────────────────
+    @Prop(
+        raw({
+            status: { type: String, enum: ['not_submitted', 'submitted', 'failed'], default: 'not_submitted' },
+            submittedAt: { type: Date },
+            flextockOrderCode: { type: String },
+            lastError: { type: String },
+            attempts: { type: Number, default: 0 },
+            lastStatusNote: { type: String },
+            lastSyncedAt: { type: Date },
+        }),
+    )
+    flextockSubmission?: {
+        status: 'not_submitted' | 'submitted' | 'failed';
+        submittedAt?: Date;
+        flextockOrderCode?: string;
+        lastError?: string;
+        attempts: number;
+        lastStatusNote?: string;
+        lastSyncedAt?: Date;
+    };
 }
 
 const orderSchema = SchemaFactory.createForClass(Order)

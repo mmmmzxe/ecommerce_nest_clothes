@@ -113,6 +113,25 @@ export class SocialOrderController {
   }
 
   /**
+   * POST /social-orders/bulk-submit-flextock
+   * SuperAdmin: bulk submit selected social orders to Flextock
+   */
+  @Post('bulk-submit-flextock')
+  @Role(['superAdmin'])
+  async bulkSubmitFlextock(@Body('orderIds') orderIds: string[]) {
+    try {
+      if (!Array.isArray(orderIds) || orderIds.length === 0) {
+        throw new InternalServerErrorException('orderIds must be a non-empty array of strings');
+      }
+      const results = await this.socialOrderService.bulkSubmitFlextock(orderIds);
+      return { message: 'Bulk submission completed', data: results };
+    } catch (error) {
+      if (error instanceof InternalServerErrorException) throw error;
+      throw new InternalServerErrorException(error);
+    }
+  }
+
+  /**
    * GET /social-orders/:id
    * Both roles can view a specific order.
    */
@@ -165,6 +184,44 @@ export class SocialOrderController {
       const order = await this.socialOrderService.updateStatus(id, status);
       return { message: 'Done', data: order };
     } catch (error) {
+      throw new InternalServerErrorException(error);
+    }
+  }
+
+  /**
+   * POST /social-orders/:id/retry-flextock
+   * SuperAdmin only — retry a failed or never-submitted Flextock submission.
+   */
+  @Post(':id/retry-flextock')
+  @Role(['superAdmin'])
+  async retryFlextock(@Param('id') id: string) {
+    try {
+      const order = await this.socialOrderService.retryFlextock(id);
+      return { message: 'Flextock submission attempted', data: order };
+    } catch (error) {
+      if (
+        error instanceof NotFoundException ||
+        error instanceof InternalServerErrorException
+      ) throw error;
+      throw new InternalServerErrorException(error);
+    }
+  }
+
+  /**
+   * POST /social-orders/:id/sync-flextock
+   * SuperAdmin only — fetch the latest status for an order from Flextock.
+   */
+  @Post(':id/sync-flextock')
+  @Role(['superAdmin'])
+  async syncFlextockStatus(@Param('id') id: string) {
+    try {
+      const order = await this.socialOrderService.syncFlextockStatus(id);
+      return { message: 'Flextock status synced', data: order };
+    } catch (error) {
+      if (
+        error instanceof NotFoundException ||
+        error instanceof InternalServerErrorException
+      ) throw error;
       throw new InternalServerErrorException(error);
     }
   }

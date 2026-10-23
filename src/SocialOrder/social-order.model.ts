@@ -1,4 +1,5 @@
 import { MongooseModule, Prop, raw, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { FlextockStatus } from 'src/Flextock/flextock.service';
 import { Document, Types } from 'mongoose';
 
 export type SellerName = 'Fatma' | 'Mariam' | 'Zeinab' | 'Sara';
@@ -9,6 +10,17 @@ export interface EditHistoryEntry {
   editedAt: Date;
   summary: string;
   previousState?: Record<string, any>;
+}
+
+// ─── Flextock Integration Tracking ──────────────────────────────────────────
+export interface FlextockSubmission {
+  status: FlextockStatus;
+  submittedAt?: Date;
+  flextockOrderCode?: string;
+  lastError?: string;
+  attempts: number;
+  lastStatusNote?: string;
+  lastSyncedAt?: Date;
 }
 
 @Schema({ timestamps: true })
@@ -92,6 +104,20 @@ export class SocialOrder {
 
   @Prop({ type: String, required: false })
   deliveryNotes?: string;
+
+  // ─── Flextock Integration ────────────────────────────────────────────────────
+  @Prop(
+    raw({
+      status: { type: String, enum: ['not_submitted', 'submitted', 'failed'], default: 'not_submitted' },
+      submittedAt: { type: Date },
+      flextockOrderCode: { type: String },
+      lastError: { type: String },
+      attempts: { type: Number, default: 0 },
+      lastStatusNote: { type: String },
+      lastSyncedAt: { type: Date },
+    }),
+  )
+  flextockSubmission?: FlextockSubmission;
 }
 
 const socialOrderSchema = SchemaFactory.createForClass(SocialOrder);

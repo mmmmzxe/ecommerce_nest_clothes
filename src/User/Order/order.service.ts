@@ -19,6 +19,7 @@ import { emailEvent } from "src/common/Utility/email.event";
 import { whatsappEvent } from "src/WhatsApp/whatsapp.event";
 import { emit } from "process";
 import { ShippingRepository } from "src/DB/models/Shipping/shipping.repository";
+import { FlextockService } from "src/Flextock/flextock.service";
 
 @Injectable()
 export class OrderService {
@@ -30,7 +31,8 @@ export class OrderService {
         private readonly paymentService: PaymentService,
         private readonly userRepository: UserRepository,
         private readonly paymobService: PaymobService,
-        private readonly shippingRepository: ShippingRepository
+        private readonly shippingRepository: ShippingRepository,
+        private readonly flextockService: FlextockService
     ) { }
 
     private getSelection(product: { variant?: { color?: string; size?: string } }, fallback?: { color?: string; size?: string }) {
@@ -405,6 +407,16 @@ export class OrderService {
 
 
 
+            // Automatic submission to Flextock when order is placed or on_way
+            if (body.status === OrderStatus.placed || body.status === OrderStatus.onWay) {
+                const existing = (order as any).flextockSubmission;
+                if (existing?.status !== 'submitted') {
+                    this.submitToFlextock(order).catch((err) =>
+                        console.error(`Async Flextock submission failed for order ${order._id}:`, err),
+                    );
+                }
+            }
+
             if (body.status === OrderStatus.cancelled) {
                 for (const product of order?.products as IorderProduct[]) {
                     const selection = this.getSelection(product as any, product.variant);
@@ -429,6 +441,142 @@ export class OrderService {
             }
             throw new InternalServerErrorException(error)
         }
+    }
+
+    // ─── Submit regular order to Flextock ──────────────────────────────────
+    async submitToFlextock(order: any): Promise<void> {
+        const currentAttempts = ((order as any).flextockSubmission?.attempts ?? 0) + 1;
+        try {
+            await this.orderRepository.updateOne(
+                { _id: order._id },
+                {
+                    $set: {
+                        'flextockSubmission.status': 'not_submitted',
+                        'flextockSubmission.attempts': currentAttempts,
+                        'flextockSubmission.lastError': null,
+                    },
+                },
+            );
+
+            // Populate shipping if needed for city
+            let populatedOrder = order;
+            if (order.shippingId && typeof order.shippingId !== 'object') {
+                populatedOrder = await this.orderRepository.findOne({
+                    _id: order._id,
+                    population: [{ path: 'shippingId' }],
+                });
+            }
+
+            const flextockOrderCode = await this.flextockService.submitOrder(populatedOrder || order);
+
+            await this.orderRepository.updateOne(
+                { _id: order._id },
+                {
+                    $set: {
+                        'flextockSubmission.status': 'submitted',
+                        'flextockSubmission.submittedAt': new Date(),
+                        'flextockSubmission.flextockOrderCode': flextockOrderCode,
+                        'flextockSubmission.lastError': null,
+                        'flextockSubmission.attempts': currentAttempts,
+                    },
+                },
+            );
+        } catch (err: any) {
+            const message: string = err?.message ?? String(err);
+            console.error(`Flextock submission failed for order ${order._id}: ${message}`);
+            await this.orderRepository.updateOne(
+                { _id: order._id },
+                {
+                    $set: {
+                        'flextockSubmission.status': 'failed',
+                        'flextockSubmission.lastError': message,
+                        'flextockSubmission.attempts': currentAttempts,
+                    },
+                },
+            );
+        }
+    }
+
+    // ─── Retry Flextock submission ─────────────────────────────────────────
+    async retryFlextock(orderId: Types.ObjectId) {
+        try {
+            const order = await this.orderRepository.findOne({
+                _id: orderId,
+                population: [{ path: 'shippingId' }, { path: 'createdBy' }],
+            });
+            if (!order) {
+                throw new NotFoundException('Order not found');
+            }
+            await this.submitToFlextock(order);
+            return await this.orderRepository.findOne({
+                _id: orderId,
+                population: [{ path: 'shippingId' }, { path: 'createdBy' }],
+            });
+        } catch (error) {
+            if (error instanceof HttpException) throw error;
+            throw new InternalServerErrorException(error);
+        }
+    }
+
+    // ─── Sync Flextock status ──────────────────────────────────────────────
+    async syncFlextock(orderId: Types.ObjectId) {
+        try {
+            const order = await this.orderRepository.findOne({ _id: orderId });
+            if (!order) {
+                throw new NotFoundException('Order not found');
+            }
+            const flextockCode = (order as any).flextockSubmission?.flextockOrderCode;
+            if (!flextockCode) {
+                throw new BadRequestException('Order has not been submitted to Flextock yet');
+            }
+            const statusResult = await this.flextockService.getOrderStatus(flextockCode);
+            if (!statusResult) {
+                throw new BadRequestException('Could not retrieve status from Flextock');
+            }
+            const updatedNote = `Flextock status: ${statusResult.order_status}` +
+                (statusResult.tracking_number ? ` | Tracking: ${statusResult.tracking_number}` : '') +
+                (statusResult.courier_name ? ` | Courier: ${statusResult.courier_name}` : '');
+
+            await this.orderRepository.updateOne(
+                { _id: orderId },
+                {
+                    $set: {
+                        'flextockSubmission.lastError': null,
+                        'flextockSubmission.lastStatusNote': updatedNote,
+                        'flextockSubmission.lastSyncedAt': new Date(),
+                    },
+                },
+            );
+            return await this.orderRepository.findOne({
+                _id: orderId,
+                population: [{ path: 'shippingId' }, { path: 'createdBy' }],
+            });
+        } catch (error) {
+            if (error instanceof HttpException) throw error;
+            throw new InternalServerErrorException(error);
+        }
+    }
+
+    // ─── Bulk Submit Flextock ──────────────────────────────────────────────
+    async bulkSubmitFlextock(orderIds: string[]) {
+        const results: { id: string; status: 'success' | 'failed'; error?: string }[] = [];
+        for (const id of orderIds) {
+            try {
+                const order = await this.orderRepository.findOne({
+                    _id: new Types.ObjectId(id),
+                    population: [{ path: 'shippingId' }],
+                });
+                if (order) {
+                    await this.submitToFlextock(order);
+                    results.push({ id, status: 'success' });
+                } else {
+                    results.push({ id, status: 'failed', error: 'Order not found' });
+                }
+            } catch (err: any) {
+                results.push({ id, status: 'failed', error: err?.message ?? String(err) });
+            }
+        }
+        return results;
     }
 
     async updateDeposit(orderId: Types.ObjectId, body: UpdateDepositDTO) {

@@ -76,6 +76,15 @@ export interface IOrder extends IOrderInputs {
     intentId?: string,
     deposit?: number,
     depositReceipt?: { secure_url: string; public_id: string },
+    flextockSubmission?: {
+        status: 'not_submitted' | 'submitted' | 'failed';
+        submittedAt?: Date;
+        flextockOrderCode?: string;
+        lastError?: string;
+        attempts: number;
+        lastStatusNote?: string;
+        lastSyncedAt?: Date;
+    },
     updatedAt:Date,
     createdAt:Date
 }

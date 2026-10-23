@@ -4,13 +4,14 @@ import { UserModel } from 'src/DB/models/User/user.model';
 import { UserRepository } from 'src/DB/models/User/user.repository';
 import { CloudService } from 'src/common/service/cloud.service';
 import { TokenService } from 'src/common/service/token.service';
+import { FlextockModule } from 'src/Flextock/flextock.module';
 import { SocialOrderController } from './social-order.controller';
 import { SocialOrderModel } from './social-order.model';
 import { SocialOrderRepository } from './social-order.repository';
 import { SocialOrderService } from './social-order.service';
 
 @Module({
-  imports: [SocialOrderModel, UserModel],
+  imports: [SocialOrderModel, UserModel, FlextockModule],
   controllers: [SocialOrderController],
   providers: [
     SocialOrderService,

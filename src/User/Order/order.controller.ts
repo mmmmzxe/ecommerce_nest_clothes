@@ -1,4 +1,4 @@
-import { Body, Controller, Get, InternalServerErrorException, Param, Patch, Post, Req, UseGuards, UsePipes, ValidationPipe, UseInterceptors } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, InternalServerErrorException, Param, Patch, Post, Req, UseGuards, UsePipes, ValidationPipe, UseInterceptors } from "@nestjs/common";
 import { OrderService } from "./order.service";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { multerOptions } from "src/common/Utility/multer";
@@ -50,6 +50,15 @@ export class OrderController {
         }
     }
 
+    @Role(["admin", "superAdmin"])
+    @Post("bulk-submit-flextock")
+    async bulkSubmitFlextock(@Body("orderIds") orderIds: string[]) {
+        if (!Array.isArray(orderIds) || orderIds.length === 0) {
+            throw new BadRequestException("orderIds array is required");
+        }
+        return await this.orderService.bulkSubmitFlextock(orderIds);
+    }
+
     @Post(":orderId/paymob")
     async paymob(@Req() req: Request, @Param() params: OrderIdDTO) {
         return await this.orderService.checkOut(req, params.orderId)
@@ -87,6 +96,18 @@ export class OrderController {
     @Patch(":orderId/deposit")
     async updateDeposit(@Param() params: OrderIdDTO, @Body() body: UpdateDepositDTO) {
         return await this.orderService.updateDeposit(params.orderId, body)
+    }
+
+    @Role(["admin", "superAdmin"])
+    @Post(":orderId/retry-flextock")
+    async retryFlextock(@Param() params: OrderIdDTO) {
+        return await this.orderService.retryFlextock(params.orderId);
+    }
+
+    @Role(["admin", "superAdmin"])
+    @Post(":orderId/sync-flextock")
+    async syncFlextock(@Param() params: OrderIdDTO) {
+        return await this.orderService.syncFlextock(params.orderId);
     }
 
 

@@ -7,11 +7,12 @@ import {
 } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { TypeUser } from 'src/DB/models/User/user.model';
+import { UserRepository } from 'src/DB/models/User/user.repository';
 import { CloudService } from 'src/common/service/cloud.service';
 import { emailEvent } from 'src/common/Utility/email.event';
 import { CreateSocialOrderDto } from './dto/create-social-order.dto';
 import { SocialOrderRepository } from './social-order.repository';
-import { TypeSocialOrder } from './social-order.model';
+import { TypeSocialOrder, SocialProduct } from './social-order.model';
 import { FlextockService } from 'src/Flextock/flextock.service';
 
 const SELLER_NAMES = ['Fatma', 'Mariam', 'Zeinab', 'Sara'] as const;
@@ -24,13 +25,27 @@ export class SocialOrderService {
     private readonly socialOrderRepository: SocialOrderRepository,
     private readonly cloudService: CloudService,
     private readonly flextockService: FlextockService,
+    private readonly userRepository: UserRepository,
   ) {}
+
+  private parseProducts(rawProducts: any): any[] {
+    if (!rawProducts) return [];
+    if (Array.isArray(rawProducts)) return rawProducts;
+    if (typeof rawProducts === 'string') {
+      try {
+        const parsed = JSON.parse(rawProducts);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  }
 
   async create(
     dto: CreateSocialOrderDto,
     user: TypeUser,
-    file?: Express.Multer.File,
-    depositFile?: Express.Multer.File,
+    files: Express.Multer.File[] = [],
   ): Promise<TypeSocialOrder> {
     try {
       // Admins can only create orders under their own name.
@@ -46,15 +61,8 @@ export class SocialOrderService {
         }
       }
 
-      let productImage: { secure_url: string; public_id: string } | undefined;
-      if (file) {
-        const uploaded = await this.cloudService.uploadFile({ path: file.path });
-        productImage = {
-          secure_url: uploaded.secure_url,
-          public_id: uploaded.public_id,
-        };
-      }
-
+      // ── Upload deposit image if attached ──────────────────────────────────
+      const depositFile = files.find((f) => f.fieldname === 'depositImage');
       let depositImage: { secure_url: string; public_id: string } | undefined;
       if (depositFile) {
         const uploaded = await this.cloudService.uploadFile({ path: depositFile.path });
@@ -64,13 +72,97 @@ export class SocialOrderService {
         };
       }
 
+      // ── Process products (multi-product array or fallback flat fields) ────
+      let rawProducts = this.parseProducts(dto.products);
+      const processedProducts: SocialProduct[] = [];
+
+      if (rawProducts.length > 0) {
+        for (let i = 0; i < rawProducts.length; i++) {
+          const item = rawProducts[i];
+          const pFile = files.find(
+            (f) => f.fieldname === `productImage_${i}` || (i === 0 && f.fieldname === 'productImage'),
+          );
+
+          let prodImg = item.productImage;
+          if (pFile) {
+            const uploaded = await this.cloudService.uploadFile({ path: pFile.path });
+            prodImg = {
+              secure_url: uploaded.secure_url,
+              public_id: uploaded.public_id,
+            };
+          }
+
+          const variants = Array.isArray(item.variants) && item.variants.length > 0
+            ? item.variants.map((v: any) => ({
+                color: v.color || '',
+                size: v.size || '',
+                quantity: Number(v.quantity) || 1,
+              }))
+            : [{ color: item.color || '', size: item.size || '', quantity: Number(item.quantity) || 1 }];
+
+          processedProducts.push({
+            productName: item.productName || 'Product',
+            productImage: prodImg,
+            price: Number(item.price) || 0,
+            productNotes: item.productNotes || '',
+            variants,
+          });
+        }
+      } else if (dto.productName) {
+        // Fallback for legacy single-product creation
+        const pFile = files.find((f) => f.fieldname === 'productImage');
+        let legacyProductImage: { secure_url: string; public_id: string } | undefined;
+        if (pFile) {
+          const uploaded = await this.cloudService.uploadFile({ path: pFile.path });
+          legacyProductImage = {
+            secure_url: uploaded.secure_url,
+            public_id: uploaded.public_id,
+          };
+        }
+
+        processedProducts.push({
+          productName: dto.productName,
+          productImage: legacyProductImage,
+          price: Number(dto.price) || 0,
+          productNotes: dto.productNotes || '',
+          variants: [
+            {
+              color: dto.color || '',
+              size: dto.size || '',
+              quantity: Number(dto.quantity) || 1,
+            },
+          ],
+        });
+      }
+
+      // Legacy flat fields mapping for backward compatibility
+      const primaryProduct = processedProducts[0];
+      const totalQuantity = processedProducts.reduce(
+        (sum, p) => sum + (p.variants || []).reduce((s, v) => s + (Number(v.quantity) || 0), 0),
+        0,
+      );
+
       const order = await this.socialOrderRepository.create({
-        ...dto,
+        createdBy: dto.createdBy,
+        customerName: dto.customerName,
+        customerPhone: dto.customerPhone,
+        customerAddress: dto.customerAddress,
+        city: dto.city,
+        deliveryNotes: dto.deliveryNotes,
         deposit: dto.deposit ? Number(dto.deposit) : 0,
-        createdByUserId: new Types.ObjectId((user._id as any).toString()),
-        productImage,
         depositImage,
+        products: processedProducts,
+        // Legacy fields for backward compatibility
+        productName: primaryProduct?.productName || dto.productName || 'Product',
+        price: primaryProduct?.price ?? (dto.price ? Number(dto.price) : 0),
+        quantity: totalQuantity > 0 ? totalQuantity : (dto.quantity ? Number(dto.quantity) : 1),
+        color: primaryProduct?.variants?.[0]?.color || dto.color || '',
+        size: primaryProduct?.variants?.[0]?.size || dto.size || '',
+        productNotes: primaryProduct?.productNotes || dto.productNotes || '',
+        productImage: primaryProduct?.productImage,
+        createdByUserId: new Types.ObjectId((user._id as any).toString()),
         status: 'pending',
+        editHistory: [],
       } as any);
 
       // Emit email notification to extrachick8@gmail.com
@@ -102,7 +194,8 @@ export class SocialOrderService {
   async findMyOrders(user: TypeUser): Promise<TypeSocialOrder[]> {
     try {
       return this.socialOrderRepository.findByUserId(
-        new Types.ObjectId(user._id as string),
+        new Types.ObjectId((user._id as any).toString()),
+        user.name,
       );
     } catch (error) {
       throw new InternalServerErrorException(error);
@@ -181,7 +274,23 @@ export class SocialOrderService {
         },
       );
 
-      const flextockOrderCode = await this.flextockService.submitOrder(order);
+      // Populate createdBy user for name if needed
+      let populatedOrder: any = typeof (order as any).toObject === 'function' ? (order as any).toObject() : { ...order };
+      if (order.createdByUserId) {
+        const userIdStr = (order.createdByUserId as any)?._id
+          ? (order.createdByUserId as any)._id.toString()
+          : order.createdByUserId.toString();
+        try {
+          const user = await this.userRepository.findOne({ _id: new Types.ObjectId(userIdStr) });
+          if (user) {
+            populatedOrder.createdByUserId = user;
+          }
+        } catch {
+          // fallback
+        }
+      }
+
+      const flextockOrderCode = await this.flextockService.submitOrder(populatedOrder);
 
       // Persist success
       await this.socialOrderRepository.findOneAndUpdate(
@@ -200,6 +309,32 @@ export class SocialOrderService {
       this.logger.log(`Order ${id} successfully submitted to Flextock as ${flextockOrderCode}`);
     } catch (err: any) {
       const message: string = err?.message ?? String(err);
+
+      // ── "Already exists" recovery ──────────────────────────────────────────
+      // The order_code is deterministic (EXC-{mongoId}). If Flextock says the
+      // code already exists, a previous attempt actually went through. Mark it
+      // as submitted so the admin is not stuck in a retry loop.
+      const alreadyExists = /already exists/i.test(message) || /duplicate/i.test(message);
+      if (alreadyExists) {
+        this.logger.warn(
+          `Order ${id}: Flextock reports order_code already exists — marking as submitted.`,
+        );
+        const inferredCode = `EXC-${id}`;
+        await this.socialOrderRepository.findOneAndUpdate(
+          { _id: order._id },
+          {
+            $set: {
+              'flextockSubmission.status': 'submitted',
+              'flextockSubmission.submittedAt': new Date(),
+              'flextockSubmission.flextockOrderCode': inferredCode,
+              'flextockSubmission.lastError': null,
+              'flextockSubmission.attempts': currentAttempts,
+            },
+          },
+        );
+        return;
+      }
+
       this.logger.error(`Flextock submission failed for order ${id}: ${message}`);
 
       // Persist failure so admin can see and retry
@@ -217,9 +352,10 @@ export class SocialOrderService {
   }
 
   // ─── Retry a failed Flextock submission ──────────────────────────────────
-  async retryFlextock(id: string): Promise<TypeSocialOrder> {
+  async retryFlextock(id: Types.ObjectId | string): Promise<TypeSocialOrder> {
     try {
-      const order = await this.socialOrderRepository.findOne({ _id: new Types.ObjectId(id) });
+      const orderId = new Types.ObjectId(id.toString());
+      const order = await this.socialOrderRepository.findOne({ _id: orderId });
       if (!order) throw new NotFoundException('Social order not found');
 
       if ((order as any).status !== 'confirmed') {
@@ -238,7 +374,7 @@ export class SocialOrderService {
       // Run synchronously so the caller can see the result immediately
       await this.submitToFlextock(order);
 
-      const refreshed = await this.socialOrderRepository.findOne({ _id: new Types.ObjectId(id) });
+      const refreshed = await this.socialOrderRepository.findOne({ _id: orderId });
       return refreshed!;
     } catch (error) {
       if (
@@ -250,17 +386,13 @@ export class SocialOrderService {
   }
 
   // ─── Sync Flextock order status (called on-demand) ────────────────────────
-  async syncFlextockStatus(id: string): Promise<TypeSocialOrder> {
+  async syncFlextockStatus(id: Types.ObjectId | string): Promise<TypeSocialOrder> {
     try {
-      const order = await this.socialOrderRepository.findOne({ _id: new Types.ObjectId(id) });
+      const orderId = new Types.ObjectId(id.toString());
+      const order = await this.socialOrderRepository.findOne({ _id: orderId });
       if (!order) throw new NotFoundException('Social order not found');
 
-      const flextockCode = (order as any).flextockSubmission?.flextockOrderCode;
-      if (!flextockCode) {
-        throw new InternalServerErrorException(
-          'Order has not been submitted to Flextock yet.',
-        );
-      }
+      const flextockCode = (order as any).flextockSubmission?.flextockOrderCode || `EXC-${orderId.toString()}`;
 
       const statusResult = await this.flextockService.getOrderStatus(flextockCode);
       if (!statusResult) {
@@ -275,9 +407,11 @@ export class SocialOrderService {
         (statusResult.courier_name ? ` | Courier: ${statusResult.courier_name}` : '');
 
       await this.socialOrderRepository.findOneAndUpdate(
-        { _id: order._id },
+        { _id: orderId },
         {
           $set: {
+            'flextockSubmission.status': 'submitted',
+            'flextockSubmission.flextockOrderCode': flextockCode,
             'flextockSubmission.lastError': null,
             'flextockSubmission.lastStatusNote': updatedNote,
             'flextockSubmission.lastSyncedAt': new Date(),
@@ -285,7 +419,7 @@ export class SocialOrderService {
         },
       );
 
-      const refreshed = await this.socialOrderRepository.findOne({ _id: new Types.ObjectId(id) });
+      const refreshed = await this.socialOrderRepository.findOne({ _id: orderId });
       return refreshed!;
     } catch (error) {
       if (
@@ -297,9 +431,10 @@ export class SocialOrderService {
   }
 
   // ─── Bulk Submit Social Orders to Flextock ──────────────────────────────
-  async bulkSubmitFlextock(orderIds: string[]): Promise<{ id: string; status: 'submitted' | 'failed' | 'skipped'; error?: string }[]> {
+  async bulkSubmitFlextock(orderIds: (Types.ObjectId | string)[]): Promise<{ id: string; status: 'submitted' | 'failed' | 'skipped'; error?: string }[]> {
     const results: { id: string; status: 'submitted' | 'failed' | 'skipped'; error?: string }[] = [];
-    for (const id of orderIds) {
+    for (const rawId of orderIds) {
+      const id = rawId.toString();
       try {
         const order = await this.socialOrderRepository.findOne({ _id: new Types.ObjectId(id) });
         if (!order) {
@@ -328,8 +463,7 @@ export class SocialOrderService {
     id: string,
     dto: Partial<CreateSocialOrderDto>,
     user: TypeUser,
-    file?: Express.Multer.File,
-    depositFile?: Express.Multer.File,
+    files: Express.Multer.File[] = [],
   ): Promise<TypeSocialOrder> {
     try {
       const order = await this.socialOrderRepository.findOne({ _id: new Types.ObjectId(id) });
@@ -361,31 +495,15 @@ export class SocialOrderService {
         }
       };
 
-      checkField('productName', 'Product Name');
-      checkField('price', 'Price');
-      checkField('deposit', 'Deposit Amount');
-      checkField('color', 'Color');
-      checkField('size', 'Size');
-      checkField('quantity', 'Quantity');
-      checkField('productNotes', 'Product Notes');
       checkField('customerName', 'Customer Name');
       checkField('customerPhone', 'Phone');
       checkField('customerAddress', 'Address');
       checkField('city', 'City');
       checkField('deliveryNotes', 'Delivery Notes');
-
-      let productImage = order.productImage;
-      if (file) {
-        const uploaded = await this.cloudService.uploadFile({ path: file.path });
-        productImage = {
-          secure_url: uploaded.secure_url,
-          public_id: uploaded.public_id,
-        };
-        changes.push('Product Image updated');
-        previousState['productImage'] = order.productImage;
-      }
+      checkField('deposit', 'Deposit Amount');
 
       let depositImage = order.depositImage;
+      const depositFile = files.find((f) => f.fieldname === 'depositImage');
       if (depositFile) {
         const uploaded = await this.cloudService.uploadFile({ path: depositFile.path });
         depositImage = {
@@ -395,6 +513,57 @@ export class SocialOrderService {
         changes.push('Deposit Image updated');
         previousState['depositImage'] = order.depositImage;
       }
+
+      // Check products
+      let updatedProducts = (order as any).products;
+      if (dto.products !== undefined) {
+        const rawProducts = this.parseProducts(dto.products);
+        if (rawProducts.length > 0) {
+          const newProducts: SocialProduct[] = [];
+          for (let i = 0; i < rawProducts.length; i++) {
+            const item = rawProducts[i];
+            const pFile = files.find(
+              (f) => f.fieldname === `productImage_${i}` || (i === 0 && f.fieldname === 'productImage'),
+            );
+
+            let prodImg = item.productImage;
+            if (pFile) {
+              const uploaded = await this.cloudService.uploadFile({ path: pFile.path });
+              prodImg = {
+                secure_url: uploaded.secure_url,
+                public_id: uploaded.public_id,
+              };
+            }
+
+            const variants = Array.isArray(item.variants) && item.variants.length > 0
+              ? item.variants.map((v: any) => ({
+                  color: v.color || '',
+                  size: v.size || '',
+                  quantity: Number(v.quantity) || 1,
+                }))
+              : [{ color: item.color || '', size: item.size || '', quantity: Number(item.quantity) || 1 }];
+
+            newProducts.push({
+              productName: item.productName || 'Product',
+              productImage: prodImg,
+              price: Number(item.price) || 0,
+              productNotes: item.productNotes || '',
+              variants,
+            });
+          }
+          previousState['products'] = (order as any).products;
+          changes.push(`Products updated (${newProducts.length} items)`);
+          updatedProducts = newProducts;
+        }
+      }
+
+      // Legacy direct edits
+      checkField('productName', 'Product Name');
+      checkField('price', 'Price');
+      checkField('color', 'Color');
+      checkField('size', 'Size');
+      checkField('quantity', 'Quantity');
+      checkField('productNotes', 'Product Notes');
 
       const summary = changes.length > 0 ? changes.join(' | ') : 'Order updated';
 
@@ -407,14 +576,38 @@ export class SocialOrderService {
       };
 
       const updatedFields: any = {
-        ...dto,
         status: 'pending', // Reset status to pending so SuperAdmin can re-confirm
       };
-      if (productImage) updatedFields.productImage = productImage;
-      if (depositImage) updatedFields.depositImage = depositImage;
-      if (dto.price !== undefined) updatedFields.price = Number(dto.price);
+      if (dto.customerName !== undefined) updatedFields.customerName = dto.customerName;
+      if (dto.customerPhone !== undefined) updatedFields.customerPhone = dto.customerPhone;
+      if (dto.customerAddress !== undefined) updatedFields.customerAddress = dto.customerAddress;
+      if (dto.city !== undefined) updatedFields.city = dto.city;
+      if (dto.deliveryNotes !== undefined) updatedFields.deliveryNotes = dto.deliveryNotes;
       if (dto.deposit !== undefined) updatedFields.deposit = Number(dto.deposit);
-      if (dto.quantity !== undefined) updatedFields.quantity = Number(dto.quantity);
+      if (depositImage) updatedFields.depositImage = depositImage;
+
+      if (updatedProducts && updatedProducts.length > 0) {
+        updatedFields.products = updatedProducts;
+        const primaryProduct = updatedProducts[0];
+        const totalQuantity = updatedProducts.reduce(
+          (sum: number, p: any) => sum + (p.variants || []).reduce((s: number, v: any) => s + (Number(v.quantity) || 0), 0),
+          0,
+        );
+        updatedFields.productName = primaryProduct.productName;
+        updatedFields.price = primaryProduct.price;
+        updatedFields.quantity = totalQuantity;
+        if (primaryProduct.productImage) updatedFields.productImage = primaryProduct.productImage;
+        if (primaryProduct.variants?.[0]?.color) updatedFields.color = primaryProduct.variants[0].color;
+        if (primaryProduct.variants?.[0]?.size) updatedFields.size = primaryProduct.variants[0].size;
+        if (primaryProduct.productNotes) updatedFields.productNotes = primaryProduct.productNotes;
+      } else {
+        if (dto.productName !== undefined) updatedFields.productName = dto.productName;
+        if (dto.price !== undefined) updatedFields.price = Number(dto.price);
+        if (dto.quantity !== undefined) updatedFields.quantity = Number(dto.quantity);
+        if (dto.color !== undefined) updatedFields.color = dto.color;
+        if (dto.size !== undefined) updatedFields.size = dto.size;
+        if (dto.productNotes !== undefined) updatedFields.productNotes = dto.productNotes;
+      }
 
       const updated = await this.socialOrderRepository.findOneAndUpdate(
         { _id: new Types.ObjectId(id) },
@@ -442,7 +635,7 @@ export class SocialOrderService {
     try {
       const raw = await this.socialOrderRepository.countBySeller();
 
-      // Ensure all three sellers are always present
+      // Ensure all sellers are always present
       const map = new Map(raw.map((r) => [r._id, r]));
       return SELLER_NAMES.map((name) => {
         const item = map.get(name);
@@ -459,5 +652,3 @@ export class SocialOrderService {
     }
   }
 }
-
-

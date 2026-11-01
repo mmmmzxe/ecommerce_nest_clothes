@@ -13,10 +13,15 @@ export class SocialOrderRepository extends DBService<TypeSocialOrder> {
     super(socialOrderModel);
   }
 
-  async findByUserId(userId: Types.ObjectId): Promise<TypeSocialOrder[]> {
+  async findByUserId(userId: Types.ObjectId, sellerName?: string): Promise<TypeSocialOrder[]> {
+    const filter: any = sellerName
+      ? { $or: [{ createdByUserId: userId }, { createdBy: sellerName }] }
+      : { createdByUserId: userId };
+
     return this.socialOrderModel
-      .find({ createdByUserId: userId })
+      .find(filter)
       .sort({ createdAt: -1 })
+      .populate({ path: 'createdByUserId', select: 'name email' })
       .exec();
   }
 

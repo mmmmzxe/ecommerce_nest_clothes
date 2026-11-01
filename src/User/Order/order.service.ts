@@ -458,16 +458,52 @@ export class OrderService {
                 },
             );
 
-            // Populate shipping if needed for city
-            let populatedOrder = order;
-            if (order.shippingId && typeof order.shippingId !== 'object') {
-                populatedOrder = await this.orderRepository.findOne({
-                    _id: order._id,
-                    population: [{ path: 'shippingId' }],
-                });
+            // Populate shipping for city/government and createdBy for customer name
+            let populatedOrder: any = typeof order.toObject === 'function' ? order.toObject() : { ...order };
+
+            // Populate shippingId
+            if (order.shippingId) {
+                const shippingIdStr = typeof order.shippingId === 'object' && (order.shippingId as any)._id
+                    ? (order.shippingId as any)._id.toString()
+                    : order.shippingId.toString();
+                try {
+                    const shipping = await this.shippingRepository.findOne({ _id: new Types.ObjectId(shippingIdStr) });
+                    if (shipping) {
+                        populatedOrder.shippingId = shipping;
+                    }
+                } catch {
+                    // fallback
+                }
             }
 
-            const flextockOrderCode = await this.flextockService.submitOrder(populatedOrder || order);
+            // Populate createdBy user for name
+            if (order.createdBy) {
+                try {
+                    const user = await this.userRepository.findOne({ _id: order.createdBy });
+                    if (user) {
+                        populatedOrder.createdBy = user;
+                    }
+                } catch {
+                    // fallback
+                }
+            }
+
+            // Populate product images
+            for (let i = 0; i < (populatedOrder.products || []).length; i++) {
+                const prod = populatedOrder.products[i];
+                if (prod.productId && typeof prod.productId !== 'object') {
+                    try {
+                        const fullProduct = await this.productRepository.findOne({ _id: new Types.ObjectId(prod.productId.toString()) });
+                        if (fullProduct) {
+                            populatedOrder.products[i].productId = fullProduct;
+                        }
+                    } catch {
+                        // fallback
+                    }
+                }
+            }
+
+            const flextockOrderCode = await this.flextockService.submitOrder(populatedOrder);
 
             await this.orderRepository.updateOne(
                 { _id: order._id },
@@ -484,6 +520,36 @@ export class OrderService {
         } catch (err: any) {
             const message: string = err?.message ?? String(err);
             console.error(`Flextock submission failed for order ${order._id}: ${message}`);
+
+            // ── "Already exists" recovery ──────────────────────────────────────────
+            // The order_code is deterministic (EXC-{mongoId}). If Flextock says the
+            // code already exists, a previous attempt actually succeeded. Mark it
+            // as submitted so the admin is not stuck in a retry loop.
+            const orderCode = `EXC-${order._id.toString()}`;
+            const alreadyExists =
+                /already exists/i.test(message) ||
+                /duplicate/i.test(message) ||
+                message.includes(orderCode);
+
+            if (alreadyExists) {
+                console.warn(
+                    `Order ${order._id}: Flextock reports order_code already exists — marking as submitted.`,
+                );
+                await this.orderRepository.updateOne(
+                    { _id: order._id },
+                    {
+                        $set: {
+                            'flextockSubmission.status': 'submitted',
+                            'flextockSubmission.submittedAt': (order as any).flextockSubmission?.submittedAt || new Date(),
+                            'flextockSubmission.flextockOrderCode': orderCode,
+                            'flextockSubmission.lastError': null,
+                            'flextockSubmission.attempts': currentAttempts,
+                        },
+                    },
+                );
+                return;
+            }
+
             await this.orderRepository.updateOne(
                 { _id: order._id },
                 {
@@ -498,20 +564,15 @@ export class OrderService {
     }
 
     // ─── Retry Flextock submission ─────────────────────────────────────────
-    async retryFlextock(orderId: Types.ObjectId) {
+    async retryFlextock(orderId: Types.ObjectId | string) {
         try {
-            const order = await this.orderRepository.findOne({
-                _id: orderId,
-                population: [{ path: 'shippingId' }, { path: 'createdBy' }],
-            });
+            const id = new Types.ObjectId(orderId.toString());
+            const order = await this.orderRepository.findOne({ _id: id });
             if (!order) {
                 throw new NotFoundException('Order not found');
             }
             await this.submitToFlextock(order);
-            return await this.orderRepository.findOne({
-                _id: orderId,
-                population: [{ path: 'shippingId' }, { path: 'createdBy' }],
-            });
+            return await this.orderRepository.findOne({ _id: id });
         } catch (error) {
             if (error instanceof HttpException) throw error;
             throw new InternalServerErrorException(error);
@@ -519,16 +580,14 @@ export class OrderService {
     }
 
     // ─── Sync Flextock status ──────────────────────────────────────────────
-    async syncFlextock(orderId: Types.ObjectId) {
+    async syncFlextock(orderId: Types.ObjectId | string) {
         try {
-            const order = await this.orderRepository.findOne({ _id: orderId });
+            const id = new Types.ObjectId(orderId.toString());
+            const order = await this.orderRepository.findOne({ _id: id });
             if (!order) {
                 throw new NotFoundException('Order not found');
             }
-            const flextockCode = (order as any).flextockSubmission?.flextockOrderCode;
-            if (!flextockCode) {
-                throw new BadRequestException('Order has not been submitted to Flextock yet');
-            }
+            const flextockCode = (order as any).flextockSubmission?.flextockOrderCode || `EXC-${id.toString()}`;
             const statusResult = await this.flextockService.getOrderStatus(flextockCode);
             if (!statusResult) {
                 throw new BadRequestException('Could not retrieve status from Flextock');
@@ -538,19 +597,18 @@ export class OrderService {
                 (statusResult.courier_name ? ` | Courier: ${statusResult.courier_name}` : '');
 
             await this.orderRepository.updateOne(
-                { _id: orderId },
+                { _id: id },
                 {
                     $set: {
+                        'flextockSubmission.status': 'submitted',
+                        'flextockSubmission.flextockOrderCode': flextockCode,
                         'flextockSubmission.lastError': null,
                         'flextockSubmission.lastStatusNote': updatedNote,
                         'flextockSubmission.lastSyncedAt': new Date(),
                     },
                 },
             );
-            return await this.orderRepository.findOne({
-                _id: orderId,
-                population: [{ path: 'shippingId' }, { path: 'createdBy' }],
-            });
+            return await this.orderRepository.findOne({ _id: id });
         } catch (error) {
             if (error instanceof HttpException) throw error;
             throw new InternalServerErrorException(error);
@@ -562,10 +620,7 @@ export class OrderService {
         const results: { id: string; status: 'success' | 'failed'; error?: string }[] = [];
         for (const id of orderIds) {
             try {
-                const order = await this.orderRepository.findOne({
-                    _id: new Types.ObjectId(id),
-                    population: [{ path: 'shippingId' }],
-                });
+                const order = await this.orderRepository.findOne({ _id: new Types.ObjectId(id.toString()) });
                 if (order) {
                     await this.submitToFlextock(order);
                     results.push({ id, status: 'success' });

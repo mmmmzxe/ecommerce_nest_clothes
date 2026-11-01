@@ -23,6 +23,20 @@ export interface FlextockSubmission {
   lastSyncedAt?: Date;
 }
 
+export interface SocialVariant {
+  color?: string;
+  size?: string;
+  quantity: number;
+}
+
+export interface SocialProduct {
+  productName: string;
+  productImage?: { secure_url: string; public_id: string };
+  price: number;
+  productNotes?: string;
+  variants: SocialVariant[];
+}
+
 @Schema({ timestamps: true })
 export class SocialOrder {
   // ─── Seller Info ────────────────────────────────────────────────────────────
@@ -51,9 +65,33 @@ export class SocialOrder {
   })
   editHistory: EditHistoryEntry[];
 
-  // ─── Product Info ────────────────────────────────────────────────────────────
-  @Prop({ type: String, required: true })
-  productName: string;
+  // ─── Products Array (Multi-product / variant schema) ─────────────────────────
+  @Prop({
+    type: [
+      raw({
+        productName: { type: String, required: true },
+        productImage: {
+          secure_url: { type: String },
+          public_id: { type: String },
+        },
+        price: { type: Number, required: true },
+        productNotes: { type: String },
+        variants: [
+          raw({
+            color: { type: String },
+            size: { type: String },
+            quantity: { type: Number, required: true, min: 1 },
+          }),
+        ],
+      }),
+    ],
+    default: [],
+  })
+  products?: SocialProduct[];
+
+  // ─── Legacy Flat Fields (Backward Compatibility) ─────────────────────────────
+  @Prop({ type: String, required: false })
+  productName?: string;
 
   @Prop(
     raw({
@@ -63,8 +101,8 @@ export class SocialOrder {
   )
   productImage?: { secure_url: string; public_id: string };
 
-  @Prop({ type: Number, required: true })
-  price: number;
+  @Prop({ type: Number, required: false })
+  price?: number;
 
   @Prop({ type: Number, required: false, default: 0 })
   deposit?: number;
@@ -83,8 +121,8 @@ export class SocialOrder {
   @Prop({ type: String, required: false })
   size?: string;
 
-  @Prop({ type: Number, required: true, min: 1 })
-  quantity: number;
+  @Prop({ type: Number, required: false })
+  quantity?: number;
 
   @Prop({ type: String, required: false })
   productNotes?: string;

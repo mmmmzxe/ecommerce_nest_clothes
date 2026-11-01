@@ -162,15 +162,26 @@ export class FlextockService {
       }
 
       const payload = {
-        products: Array.from(uniqueSkus.values()).map((p) => ({
-          sku_code: p.sku_code,
-          sku_name: p.sku_name || p.sku_code,
-          sku_description: p.sku_description || p.sku_name || p.sku_code,
-          sku_image_url:
-            p.sku_image_url ||
-            'https://res.cloudinary.com/dj9oy80mc/image/upload/v1/logo.png',
-          price: p.price > 0 ? p.price : 1,
-        })),
+        products: Array.from(uniqueSkus.values()).map((p) => {
+          let sku = p.sku_code || 'item';
+          if (sku.length < 3) sku = `sku-${sku}`;
+
+          let name = (p.sku_name || sku).trim();
+          if (name.length < 3) name = `${name} item`;
+
+          let desc = (p.sku_description || name).trim();
+          if (desc.length < 3) desc = `${desc} product`;
+
+          return {
+            sku_code: sku,
+            sku_name: name.slice(0, 100),
+            sku_description: desc.slice(0, 255),
+            sku_image_url:
+              p.sku_image_url ||
+              'https://res.cloudinary.com/dj9oy80mc/image/upload/v1/logo.png',
+            price: p.price > 0 ? p.price : 1,
+          };
+        }),
       };
 
       const result = await this.httpPost<any>(
@@ -195,13 +206,24 @@ export class FlextockService {
     // Deterministic, unique order_code from MongoDB _id
     const orderCode = `EXC-${orderId}`;
 
-    // Helper to build a clean SKU code
-    const buildSkuCode = (name: string): string =>
-      name
+    // Helper to build a clean SKU code (must be at least 3 characters for Flextock)
+    const buildSkuCode = (name: string): string => {
+      let code = (name || '')
+        .trim()
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '')
-        .slice(0, 60) || 'item';
+        .slice(0, 50);
+
+      if (!code) {
+        // If empty or non-ascii (e.g. Arabic), generate stable alphanumeric code
+        const hash = Buffer.from(name || 'product').toString('hex').slice(0, 8);
+        code = `prod-${hash}`;
+      } else if (code.length < 3) {
+        code = `sku-${code}`;
+      }
+      return code;
+    };
 
     let lineItems: FlextockOrderPayload['line_items'] = [];
     const skuMetaList: FlextockProductPayload[] = [];
@@ -210,6 +232,7 @@ export class FlextockService {
     let phone = '';
     let addressLine1 = '';
     let city = 'Cairo';
+    let area = '';
     let deliveryNote: string | undefined = undefined;
     let isPrepaid = false;
     let deposit = Number(orderDoc.deposit) || 0;
@@ -222,8 +245,16 @@ export class FlextockService {
 
     if (isRegularOrder && orderDoc.products && Array.isArray(orderDoc.products) && orderDoc.products.length > 0 && orderDoc.products[0]?.productId) {
       // ── Regular Order Mapping ──────────────────────────────────────────
-      firstName = orderDoc.firstName || 'Customer';
-      lastName = orderDoc.lastName || undefined;
+      // Try to get name from order first, then from populated createdBy user
+      if (orderDoc.firstName) {
+        firstName = orderDoc.firstName;
+        lastName = orderDoc.lastName || undefined;
+      } else if (orderDoc.createdBy && typeof orderDoc.createdBy === 'object' && orderDoc.createdBy.name) {
+        const nameParts = orderDoc.createdBy.name.trim().split(/\s+/);
+        firstName = nameParts[0] || 'Customer';
+        lastName = nameParts.slice(1).join(' ') || undefined;
+      }
+
       phone = orderDoc.phone || '';
       addressLine1 = orderDoc.address || '';
       deliveryNote = orderDoc.note || undefined;
@@ -231,8 +262,10 @@ export class FlextockService {
       // Check if government / city is in populated shippingId
       if (orderDoc.shippingId && typeof orderDoc.shippingId === 'object' && orderDoc.shippingId.government) {
         city = orderDoc.shippingId.government;
+        area = orderDoc.shippingId.government;
       } else if (orderDoc.city) {
         city = orderDoc.city;
+        area = orderDoc.city;
       }
 
       isPrepaid = orderDoc.paymentWay === 'card' || Boolean(orderDoc.paidAt);
@@ -259,7 +292,6 @@ export class FlextockService {
           sku_code: sku,
           quantity: Number(prod.quantity) || 1,
           sku_price: price,
-          sku_promotional_price: null,
         });
 
         skuMetaList.push({
@@ -279,6 +311,7 @@ export class FlextockService {
       phone = orderDoc.customerPhone || '';
       addressLine1 = orderDoc.customerAddress || '';
       city = orderDoc.city || 'Cairo';
+      area = orderDoc.city || 'Cairo';
       deliveryNote = orderDoc.deliveryNotes || undefined;
 
       for (const product of orderDoc.products) {
@@ -288,7 +321,11 @@ export class FlextockService {
           'https://res.cloudinary.com/dj9oy80mc/image/upload/v1/logo.png';
         const price = Number(product.price) || 0;
 
-        for (const variant of product.variants || []) {
+        const variants = Array.isArray(product.variants) && product.variants.length > 0
+          ? product.variants
+          : [{ color: product.color, size: product.size, quantity: Number(product.quantity) || 1 }];
+
+        for (const variant of variants) {
           const qty = Number(variant.quantity) || 0;
           if (qty < 1) continue;
           let sku = baseSku;
@@ -307,7 +344,6 @@ export class FlextockService {
             sku_code: sku,
             quantity: qty,
             sku_price: price,
-            sku_promotional_price: null,
           });
 
           skuMetaList.push({
@@ -328,6 +364,7 @@ export class FlextockService {
       phone = orderDoc.customerPhone || '';
       addressLine1 = orderDoc.customerAddress || '';
       city = orderDoc.city || 'Cairo';
+      area = orderDoc.city || 'Cairo';
       deliveryNote = orderDoc.deliveryNotes || undefined;
 
       const sku = buildSkuCode(orderDoc.productName || 'product');
@@ -341,7 +378,6 @@ export class FlextockService {
           sku_code: sku,
           quantity: Number(orderDoc.quantity) || 1,
           sku_price: price,
-          sku_promotional_price: null,
         },
       ];
 
@@ -363,50 +399,103 @@ export class FlextockService {
       ? new Date(orderDoc.createdAt).toISOString().slice(0, 10)
       : new Date().toISOString().slice(0, 10);
 
-    // ── Calculate COD / Payment amount ───────────────────────────────────
-    const lineTotal = lineItems.reduce((sum, i) => sum + i.sku_price * i.quantity, 0);
-    const orderTotal = finalAmount > 0 ? finalAmount : lineTotal;
-    const codAmount = isPrepaid ? 0 : Math.max(orderTotal - deposit, 0);
+    // ── Calculate the payload total and payment split ─────────────────────
+    // Flextock validates payment_data against the values sent in this payload,
+    // not against our stored finalPrice. Keep all values at two decimal places
+    // so floating-point arithmetic cannot create a one-piastre mismatch.
+    const roundMoney = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
+    const lineTotal = roundMoney(
+      lineItems.reduce((sum, item) => sum + item.sku_price * item.quantity, 0),
+    );
+    const storedOrderTotal = finalAmount > 0 ? roundMoney(finalAmount) : lineTotal;
+    const shippingFees = roundMoney(Math.max(storedOrderTotal - lineTotal, 0));
+    const expectedOrderTotal = roundMoney(lineTotal + shippingFees);
 
-    const paymentData: FlextockOrderPayload['payment_data'] = isPrepaid
-      ? [
-          {
-            value: orderTotal,
-            payment_type: 'prepaid',
-            payment_method: orderDoc.paymentWay || 'card',
-          },
-        ]
-      : [
-          {
-            value: codAmount,
-            payment_type: 'cash_on_delivery',
-          },
-        ];
+    // A deposit is part of the payment total. Cap it to the total we are
+    // submitting so an erroneous stored deposit cannot make Flextock reject
+    // the whole order.
+    const prepaidAmount = isPrepaid
+      ? expectedOrderTotal
+      : roundMoney(Math.min(Math.max(deposit, 0), expectedOrderTotal));
+    const codAmount = roundMoney(expectedOrderTotal - prepaidAmount);
+
+    // Build payment_data: if there's a deposit, include prepaid + COD; otherwise just COD or prepaid
+    const paymentData: FlextockOrderPayload['payment_data'] = [];
+    if (isPrepaid) {
+      paymentData.push({
+        value: expectedOrderTotal,
+        payment_type: 'prepaid',
+        payment_method: orderDoc.paymentWay || 'card',
+      });
+    } else {
+      if (prepaidAmount > 0) {
+        paymentData.push({
+          value: prepaidAmount,
+          payment_type: 'prepaid',
+          payment_method: 'deposit',
+        });
+      }
+      if (codAmount > 0) {
+        paymentData.push({
+          value: codAmount,
+          payment_type: 'cash_on_delivery',
+        });
+      }
+      // If both deposit and codAmount are 0, ensure at least one payment entry
+      if (paymentData.length === 0) {
+        paymentData.push({
+          value: expectedOrderTotal,
+          payment_type: 'cash_on_delivery',
+        });
+      }
+    }
+
+    // Ensure required fields are not empty (Flextock rejects empty strings)
+    const safePhone = phone || '01000000000';
+    const safeFirstName = firstName || 'Customer';
+    // Capitalize city/area names (Flextock requires proper capitalization)
+    const capitalize = (s: string) => s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : s;
+    const safeCity = capitalize(city || 'Cairo');
+    const safeArea = capitalize(area || safeCity || 'Cairo');
+    const safeAddress = addressLine1 || `${safeCity}, Egypt`;
 
     const payload: FlextockOrderPayload = {
       order_code: orderCode,
       order_date: orderDate,
-      shipping_fees: 0,
-      is_free_shipping: true,
+      shipping_fees: shippingFees,
+      is_free_shipping: shippingFees === 0,
       is_gift_order: false,
       order_currency: 'EGP',
       integration_source: INTEGRATION_SOURCE,
       vendor_name: INTEGRATION_SOURCE,
       customer_address: {
         country: 'Egypt',
-        city: city || 'Cairo',
-        area: city || 'Cairo',
-        address_line1: addressLine1 || `${city || 'Cairo'}, Egypt`,
+        city: safeCity,
+        area: safeArea,
+        address_line1: safeAddress,
         address_line2: deliveryNote || undefined,
-        first_name: firstName || 'Customer',
+        first_name: safeFirstName,
         last_name: lastName,
-        phone_number: phone || '',
+        phone_number: safePhone,
         note: deliveryNote || undefined,
       },
       line_items: lineItems,
       payment_data: paymentData,
       requires_self_delivery: false,
     };
+
+    const paidTotal = roundMoney(
+      paymentData.reduce((sum, payment) => sum + payment.value, 0),
+    );
+    if (paidTotal !== expectedOrderTotal) {
+      throw new Error(
+        `Invalid Flextock payment total: ${paidTotal} does not match expected ${expectedOrderTotal}.`,
+      );
+    }
+
+    // ── Detailed debug logging ────────────────────────────────────────────
+    this.logger.log(`=== FLEXTOCK PAYLOAD DEBUG for order ${orderId} ===`);
+    this.logger.log(`Payload: ${JSON.stringify(payload, null, 2)}`);
 
     // 1. Ensure all product SKUs exist on Flextock before submitting the order
     await this.ensureProductsExist(skuMetaList);
@@ -428,23 +517,49 @@ export class FlextockService {
       return orderCode;
     } catch (err: any) {
       const errMsg = err?.message || String(err);
-      // Auto-recovery: If an SKU was missing, create it on-demand and retry
+
+      // ── "Already exists" recovery ──────────────────────────────────────────
+      // The order_code is deterministic (EXC-{mongoId}). If Flextock says it
+      // already exists, a previous attempt actually succeeded. Treat as success.
+      const alreadyExists =
+        /already exists/i.test(errMsg) ||
+        /duplicate/i.test(errMsg) ||
+        errMsg.includes(orderCode);
+      if (alreadyExists) {
+        this.logger.warn(
+          `Flextock reported order_code ${orderCode} already exists — treating as successful submission.`,
+        );
+        return orderCode;
+      }
+
+      // ── Missing SKU recovery — create SKU on-demand and retry ─────────────
       const skuMatch = errMsg.match(/SKU\s+([^\s]+)\s+not exists/i);
       if (skuMatch && skuMatch[1]) {
-        const missingSku = skuMatch[1];
-        this.logger.warn(`SKU ${missingSku} reported missing by Flextock. Auto-creating and retrying...`);
+        const rawSku = skuMatch[1].replace(/[^a-zA-Z0-9_-]/g, '');
+        let safeSku = rawSku;
+        if (safeSku.length < 3) safeSku = `sku-${safeSku}`;
+        const safeName = rawSku.length < 3 ? `${rawSku} item` : rawSku;
+        const safeDesc = `${safeName} product item`;
+
+        this.logger.warn(`SKU ${rawSku} reported missing by Flextock. Auto-creating (${safeSku}) and retrying...`);
         await this.ensureProductsExist([
           {
-            sku_code: missingSku,
-            sku_name: missingSku,
-            sku_description: missingSku,
+            sku_code: safeSku,
+            sku_name: safeName,
+            sku_description: safeDesc,
             sku_image_url: 'https://res.cloudinary.com/dj9oy80mc/image/upload/v1/logo.png',
             price: 1,
           },
         ]);
+
+        let retryBody = body;
+        if (safeSku !== rawSku) {
+          retryBody = body.replace(new RegExp(`"sku_code":\\s*"${rawSku}"`, 'g'), `"sku_code": "${safeSku}"`);
+        }
+
         const retryResponse = await this.httpPost<any>(
           `${FLEXTOCK_BASE_URL}${CREATE_ORDER_ENDPOINT}`,
-          body,
+          retryBody,
           token,
         );
         this.logger.log(
@@ -452,6 +567,7 @@ export class FlextockService {
         );
         return orderCode;
       }
+
       throw err;
     }
   }
@@ -514,11 +630,23 @@ export class FlextockService {
             if (status >= 200 && status < 300) {
               resolve(parsed as T);
             } else {
-              const msg =
-                parsed?.message ||
-                parsed?.detail ||
-                JSON.stringify(parsed) ||
-                `HTTP ${status}`;
+              // Capture ALL error information from Flextock
+              let msg: string;
+              if (typeof parsed === 'string') {
+                msg = parsed;
+              } else if (Array.isArray(parsed)) {
+                msg = JSON.stringify(parsed);
+              } else {
+                // Try known error fields
+                const parts: string[] = [];
+                if (parsed?.message) parts.push(typeof parsed.message === 'string' ? parsed.message : JSON.stringify(parsed.message));
+                if (parsed?.error) parts.push(typeof parsed.error === 'string' ? parsed.error : JSON.stringify(parsed.error));
+                if (parsed?.detail) parts.push(typeof parsed.detail === 'string' ? parsed.detail : JSON.stringify(parsed.detail));
+                if (parsed?.errors) parts.push(JSON.stringify(parsed.errors));
+                if (parsed?.non_field_errors) parts.push(JSON.stringify(parsed.non_field_errors));
+                // If no known fields matched, dump the whole response
+                msg = parts.length > 0 ? parts.join(' | ') : JSON.stringify(parsed);
+              }
               reject(new Error(`Flextock API error (${status}): ${msg}`));
             }
           } catch {

@@ -7,15 +7,20 @@ export class CreateSocialOrderDto {
   @IsNotEmpty()
   createdBy: 'Fatma' | 'Mariam' | 'Zeinab' | 'Sara';
 
-  // ─── Product ─────────────────────────────────────────────────────────────────
+  // ─── Products (New Multi-product Array or JSON string) ───────────────────────
+  @IsOptional()
+  products?: any;
+
+  // ─── Legacy Flat Fields (Optional for backward compatibility) ────────────────
   @IsString()
-  @IsNotEmpty()
-  productName: string;
+  @IsOptional()
+  productName?: string;
 
   @IsNumber()
   @Min(0)
+  @IsOptional()
   @Type(() => Number)
-  price: number;
+  price?: number;
 
   @IsNumber()
   @Min(0)
@@ -33,8 +38,9 @@ export class CreateSocialOrderDto {
 
   @IsNumber()
   @Min(1)
+  @IsOptional()
   @Type(() => Number)
-  quantity: number;
+  quantity?: number;
 
   @IsString()
   @IsOptional()
